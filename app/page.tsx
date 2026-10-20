@@ -1,12 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { Camera, Save, Sparkles, BookOpen, UserCheck, RefreshCw } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Camera, Save, Sparkles, BookOpen, UserCheck, RefreshCw, Archive, Clock } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface HandwritingProfile {
   personal_lexicon: string[];
   character_quirks: string[];
 }
+
+interface JournalEntry {
+  id: string;
+  image_url: string;
+  raw_transcription: string;
+  corrected_transcription: string;
+  created_at: string;
+}
+
+const DEFAULT_PROFILE_ID = "00000000-0000-0000-0000-000000000001";
 
 export default function DiaryApp() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -19,7 +30,49 @@ export default function DiaryApp() {
     personal_lexicon: [],
     character_quirks: [],
   });
+  const [pastEntries, setPastEntries] = useState<JournalEntry[]>([]);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showEntriesModal, setShowEntriesModal] = useState(false);
+
+  // Load profile and past entries on mount
+  useEffect(() => {
+    fetchProfile();
+    fetchEntries();
+  }, []);
+
+  const fetchProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("personal_lexicon, character_quirks")
+        .eq("id", DEFAULT_PROFILE_ID)
+        .single();
+
+      if (data && !error) {
+        setProfile({
+          personal_lexicon: data.personal_lexicon || [],
+          character_quirks: data.character_quirks || [],
+        });
+      }
+    } catch (err) {
+      console.error("Error loading profile from Supabase:", err);
+    }
+  };
+
+  const fetchEntries = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("entries")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (data && !error) {
+        setPastEntries(data as JournalEntry[]);
+      }
+    } catch (err) {
+      console.error("Error loading entries from Supabase:", err);
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,9 +121,10 @@ export default function DiaryApp() {
 
   const handleSaveAndLearn = async () => {
     setLoading(true);
-    setStatusMessage("Analyzing corrections to adapt AI to her penmanship...");
+    setStatusMessage("Analyzing corrections and saving to her permanent archive...");
 
     try {
+      // 1. Send diffs to learning endpoint
       const res = await fetch("/api/learn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,12 +135,31 @@ export default function DiaryApp() {
         }),
       });
       const data = await res.json();
-      if (data.updatedProfile) {
-        setProfile(data.updatedProfile);
-        setStatusMessage("Saved! Handwriting profile updated with new vocabulary & quirks.");
-      }
+
+      const updatedProfile = data.updatedProfile || profile;
+      setProfile(updatedProfile);
+
+      // 2. Persist updated profile to Supabase
+      await supabase
+        .from("profiles")
+        .update({
+          personal_lexicon: updatedProfile.personal_lexicon,
+          character_quirks: updatedProfile.character_quirks,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", DEFAULT_PROFILE_ID);
+
+      // 3. Save the entry to Supabase
+      await supabase.from("entries").insert({
+        image_url: imagePreview || "",
+        raw_transcription: rawText,
+        corrected_transcription: correctedText,
+      });
+
+      await fetchEntries();
+      setStatusMessage("Saved! Diary entry archived & handwriting memory permanently updated.");
     } catch (err: any) {
-      setStatusMessage(`Error updating profile: ${err.message}`);
+      setStatusMessage(`Error saving: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -106,10 +179,17 @@ export default function DiaryApp() {
 
         <div className="flex items-center gap-3 font-sans text-sm">
           <button
+            onClick={() => setShowEntriesModal(true)}
+            className="border border-stone-300 hover:bg-stone-50 text-stone-700 px-3 py-2 rounded flex items-center gap-2 transition"
+          >
+            <Archive size={16} /> Archive ({pastEntries.length})
+          </button>
+
+          <button
             onClick={() => setShowProfileModal(!showProfileModal)}
             className="border border-stone-300 hover:bg-stone-50 text-stone-700 px-3 py-2 rounded flex items-center gap-2 transition"
           >
-            <UserCheck size={16} /> Handwriting Memory ({profile.character_quirks.length + profile.personal_lexicon.length})
+            <UserCheck size={16} /> Memory ({profile.character_quirks.length + profile.personal_lexicon.length})
           </button>
 
           <label className="cursor-pointer bg-stone-900 hover:bg-stone-800 text-stone-100 px-4 py-2 rounded flex items-center gap-2 transition shadow-sm">
@@ -148,14 +228,14 @@ export default function DiaryApp() {
           <div className="bg-white p-5 rounded-lg border border-stone-200 shadow-sm flex flex-col">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-xs font-sans uppercase tracking-widest text-stone-400">Digital Version (Editable)</h2>
-              <span className="text-xs font-sans text-stone-400">Fixing words trains her AI</span>
+              <span className="text-xs font-sans text-stone-400">Edits permanently adapt her model</span>
             </div>
 
             <textarea
               className="w-full flex-grow p-4 border border-stone-200 rounded-md text-stone-900 bg-[#FCFBF9] leading-relaxed focus:outline-none focus:ring-1 focus:ring-stone-400 min-h-[450px] text-base"
               value={correctedText}
               onChange={(e) => setCorrectedText(e.target.value)}
-              placeholder="The transcribed page will appear here. Edit any words that were misread to calibrate her handwriting profile..."
+              placeholder="The transcribed page will appear here..."
             />
 
             <button
@@ -163,7 +243,7 @@ export default function DiaryApp() {
               disabled={loading || !correctedText}
               className="mt-4 bg-stone-900 hover:bg-stone-800 text-white py-2.5 rounded font-sans text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
             >
-              <Save size={16} /> {loading ? "Updating Profile..." : "Save & Teach AI Her Style"}
+              <Save size={16} /> {loading ? "Saving..." : "Save to Archive & Adapt AI"}
             </button>
           </div>
         </div>
@@ -181,6 +261,43 @@ export default function DiaryApp() {
         </div>
       )}
 
+      {/* Archive Drawer Modal */}
+      {showEntriesModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white max-w-2xl w-full rounded-lg p-6 border border-stone-200 font-sans max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b">
+              <h3 className="text-lg font-medium text-stone-900 flex items-center gap-2">
+                <Archive size={18} /> Digitized Journal Archive
+              </h3>
+              <button onClick={() => setShowEntriesModal(false)} className="text-stone-400 hover:text-stone-700">✕</button>
+            </div>
+
+            <div className="overflow-y-auto space-y-4 flex-grow pr-1">
+              {pastEntries.length === 0 ? (
+                <p className="text-sm text-stone-400 italic">No entries saved yet.</p>
+              ) : (
+                pastEntries.map((entry) => (
+                  <div key={entry.id} className="p-4 border rounded-md bg-stone-50">
+                    <div className="flex items-center gap-1 text-xs text-stone-400 mb-2">
+                      <Clock size={12} />
+                      {new Date(entry.created_at).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </div>
+                    <p className="font-serif text-sm text-stone-800 whitespace-pre-wrap leading-relaxed line-clamp-4">
+                      {entry.corrected_transcription}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Memory Modal */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-lg w-full rounded-lg p-6 border border-stone-200 font-sans">
@@ -188,12 +305,12 @@ export default function DiaryApp() {
               <h3 className="text-lg font-medium text-stone-900">Learned Penmanship Profile</h3>
               <button onClick={() => setShowProfileModal(false)} className="text-stone-400 hover:text-stone-700">✕</button>
             </div>
-            
+
             <div className="space-y-4 text-sm text-stone-700 max-h-[60vh] overflow-y-auto">
               <div>
                 <h4 className="font-semibold text-xs text-stone-500 uppercase tracking-wider mb-1">Personal Names & Lexicon:</h4>
                 {profile.personal_lexicon.length === 0 ? (
-                  <p className="text-xs text-stone-400 italic">No custom words logged yet. They will appear as she corrects entries.</p>
+                  <p className="text-xs text-stone-400 italic">No custom words logged yet.</p>
                 ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {profile.personal_lexicon.map((word, i) => (
@@ -218,10 +335,7 @@ export default function DiaryApp() {
             </div>
 
             <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setShowProfileModal(false)}
-                className="px-4 py-2 bg-stone-900 text-white rounded text-xs"
-              >
+              <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-stone-900 text-white rounded text-xs">
                 Close
               </button>
             </div>
