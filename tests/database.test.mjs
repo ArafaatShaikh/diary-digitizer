@@ -291,3 +291,158 @@ test("diaries preserve loose pages and enforce page/diary ownership", async () =
     await db.close();
   }
 });
+
+test("optional covers stay private and cannot reference another owner or diary", async () => {
+  const db = await fixture();
+  try {
+    await db.exec(migration);
+    await db.exec(
+      await readFile(
+        new URL(
+          "../supabase/migrations/202610200002_diaries.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    await asUser(db, ids[0]);
+    const diary = (
+      await db.query(
+        `insert into public.diaries(user_id, title) values ($1, 'Original diary') returning id`,
+        [ids[0]],
+      )
+    ).rows[0].id;
+    await db.exec("reset role");
+    const coversMigration = await readFile(
+      new URL(
+        "../supabase/migrations/202610200003_diary_covers.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await db.exec(coversMigration);
+    await db.exec(coversMigration);
+    assert.equal(
+      (
+        await db.query("select cover_path from public.diaries where id = $1", [
+          diary,
+        ])
+      ).rows[0].cover_path,
+      null,
+    );
+    const bucket = (
+      await db.query("select * from storage.buckets where id = 'diary-covers'")
+    ).rows[0];
+    assert.equal(bucket.public, false);
+    assert.equal(Number(bucket.file_size_limit), 750000);
+    assert.deepEqual(bucket.allowed_mime_types, ["image/jpeg"]);
+    await asUser(db, ids[0]);
+    const path = `${ids[0]}/${diary}/cover.jpg`;
+    await db.query(
+      "insert into storage.objects(bucket_id, name) values ('diary-covers', $1)",
+      [path],
+    );
+    await db.query("update public.diaries set cover_path = $1 where id = $2", [
+      path,
+      diary,
+    ]);
+    await assert.rejects(
+      db.query("update public.diaries set cover_path = $1 where id = $2", [
+        `${ids[1]}/${diary}/cover.jpg`,
+        diary,
+      ]),
+      /check constraint/,
+    );
+    await assert.rejects(
+      db.query("update public.diaries set cover_path = $1 where id = $2", [
+        `${ids[0]}/${ids[1]}/cover.jpg`,
+        diary,
+      ]),
+      /check constraint/,
+    );
+    await asUser(db, ids[1]);
+    assert.equal(
+      (
+        await db.query(
+          "select * from storage.objects where bucket_id = 'diary-covers'",
+        )
+      ).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "update storage.objects set name = $1 where name = $2 returning name",
+          ["stolen", path],
+        )
+      ).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "delete from storage.objects where name = $1 returning name",
+          [path],
+        )
+      ).rows.length,
+      0,
+    );
+    await assert.rejects(
+      db.query(
+        "insert into storage.objects(bucket_id, name) values ('diary-covers', $1)",
+        [path],
+      ),
+      /row-level security/,
+    );
+    await asUser(db, ids[0]);
+    const replacement = `${ids[0]}/${diary}/replacement.jpg`;
+    await db.query(
+      "insert into storage.objects(bucket_id, name) values ('diary-covers', $1)",
+      [replacement],
+    );
+    await db.query("update public.diaries set cover_path = $1 where id = $2", [
+      replacement,
+      diary,
+    ]);
+    await db.query("delete from storage.objects where name = $1", [path]);
+    assert.equal(
+      (
+        await db.query("select cover_path from public.diaries where id = $1", [
+          diary,
+        ])
+      ).rows[0].cover_path,
+      replacement,
+    );
+    await db.query(
+      "update public.diaries set cover_path = null where id = $1",
+      [diary],
+    );
+    await db.query("delete from storage.objects where name = $1", [
+      replacement,
+    ]);
+    assert.equal(
+      (
+        await db.query(
+          "select title, cover_path from public.diaries where id = $1",
+          [diary],
+        )
+      ).rows[0].title,
+      "Original diary",
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select * from storage.objects where bucket_id = 'diary-covers'",
+        )
+      ).rows.length,
+      0,
+    );
+    await db.exec("reset role; set role anon;");
+    await assert.rejects(
+      db.exec("select * from storage.objects"),
+      /permission denied/,
+    );
+  } finally {
+    await db.close();
+  }
+});
