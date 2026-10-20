@@ -224,7 +224,7 @@ export default function DiaryApp() {
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               placeholder="Enter passcode"
-              className="w-full px-4 py-2.5 text-center text-lg tracking-widest border border-stone-300 rounded-md focus:outline-none focus:ring-1 focus:ring-stone-600"
+              className="w-full px-4 py-2.5 text-center text-lg tracking-widest text-stone-900 bg-white placeholder:text-stone-400 border border-stone-400 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-800 focus:border-stone-800"
               autoFocus
             />
 
