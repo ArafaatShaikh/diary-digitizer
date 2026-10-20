@@ -148,3 +148,146 @@ test("migration preserves legacy rows and removes permissive policies", async ()
     await db.close();
   }
 });
+
+test("diaries preserve loose pages and enforce page/diary ownership", async () => {
+  const db = await fixture();
+  const diaryMigration = await readFile(
+    new URL("../supabase/migrations/202610200002_diaries.sql", import.meta.url),
+    "utf8",
+  );
+  try {
+    await db.exec(migration);
+    await asUser(db, ids[0]);
+    await db.exec(
+      `insert into public.entries(user_id, image_url, corrected_transcription) values ('${ids[0]}', '', 'existing page');`,
+    );
+    await db.exec("reset role");
+    await db.exec(diaryMigration);
+    await db.exec(diaryMigration);
+    await asUser(db, ids[0]);
+    const existing = (
+      await db.query(
+        "select id, diary_id, corrected_transcription from public.entries",
+      )
+    ).rows[0];
+    assert.equal(existing.diary_id, null);
+    assert.equal(existing.corrected_transcription, "existing page");
+    const first = (
+      await db.query(
+        `insert into public.diaries(user_id, title) values ('${ids[0]}', '2026 diary') returning id`,
+      )
+    ).rows[0].id;
+    const second = (
+      await db.query(
+        `insert into public.diaries(user_id, title) values ('${ids[0]}', 'Travel diary') returning id`,
+      )
+    ).rows[0].id;
+    const empty = (
+      await db.query(
+        `insert into public.diaries(user_id, title) values ('${ids[0]}', 'Empty diary') returning id`,
+      )
+    ).rows[0].id;
+    await db.query(
+      `update public.entries set diary_id = $1, page_number = 1 where id = $2`,
+      [first, existing.id],
+    );
+    await db.query(
+      `insert into public.entries(user_id, image_url, diary_id, page_number) values ($1, '', $2, 1)`,
+      [ids[0], second],
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select count(*)::int as n from public.entries where page_number = 1",
+        )
+      ).rows[0].n,
+      2,
+    );
+    await db.query("update public.diaries set title = $1 where id = $2", [
+      "Renamed diary",
+      first,
+    ]);
+    await assert.rejects(
+      db.query("delete from public.diaries where id = $1", [first]),
+      /foreign key/,
+    );
+    await db.query("delete from public.diaries where id = $1", [empty]);
+    await asUser(db, ids[1]);
+    assert.equal(
+      (await db.query("select * from public.diaries")).rows.length,
+      0,
+    );
+    assert.equal(
+      (await db.query("select * from public.entries")).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "update public.diaries set title = $1 where id = $2 returning id",
+          ["stolen", first],
+        )
+      ).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "delete from public.diaries where id = $1 returning id",
+          [first],
+        )
+      ).rows.length,
+      0,
+    );
+    await assert.rejects(
+      db.query(
+        `insert into public.entries(user_id, image_url, diary_id) values ($1, '', $2)`,
+        [ids[1], first],
+      ),
+      /foreign key/,
+    );
+    await assert.rejects(
+      db.query(
+        `insert into public.diaries(user_id, title) values ($1, 'spoof')`,
+        [ids[0]],
+      ),
+      /row-level security/,
+    );
+    const other = (
+      await db.query(
+        `insert into public.diaries(user_id, title) values ($1, 'Other owner') returning id`,
+        [ids[1]],
+      )
+    ).rows[0].id;
+    await asUser(db, ids[0]);
+    await assert.rejects(
+      db.query("update public.entries set diary_id = $1 where id = $2", [
+        other,
+        existing.id,
+      ]),
+      /foreign key/,
+    );
+    await db.query("update public.entries set diary_id = $1 where id = $2", [
+      second,
+      existing.id,
+    ]);
+    await db.query("update public.entries set diary_id = null where id = $1", [
+      existing.id,
+    ]);
+    assert.equal(
+      (
+        await db.query("select diary_id from public.entries where id = $1", [
+          existing.id,
+        ])
+      ).rows[0].diary_id,
+      null,
+    );
+    await db.exec("reset role; set role anon;");
+    await assert.rejects(
+      db.exec("select * from public.diaries"),
+      /permission denied/,
+    );
+  } finally {
+    await db.close();
+  }
+});
