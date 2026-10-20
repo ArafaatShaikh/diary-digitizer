@@ -4,16 +4,12 @@ export async function POST(req: NextRequest) {
   try {
     const { passcode } = await req.json();
     
-    // Accept either APP_PASSCODE or APP_PASSWORD
-    const rawPasscode = 
-      process.env.APP_PASSCODE || 
-      process.env.APP_PASSWORD || 
-      "1234";
+    // Read from Vercel if present; otherwise default directly to your passcode
+    const envPass = (process.env.APP_PASSCODE || process.env.APP_PASSWORD || "")
+      .replace(/^["']|["']$/g, "")
+      .trim();
 
-    const serverPasscode = rawPasscode.replace(/^["']|["']$/g, "").trim();
-
-    // Log diagnostic check in Vercel runtime logs (without exposing full secret)
-    console.log(`[Auth Check] Env var loaded: ${serverPasscode !== "1234" ? "Custom Passcode Active" : "Default 1234 Fallback"}`);
+    const serverPasscode = envPass || "sumaislam1710";
 
     if (passcode && passcode.toString().trim() === serverPasscode) {
       return NextResponse.json({ success: true });
