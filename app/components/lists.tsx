@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import CalendarReminder from "./calendar-reminder";
 import { preparePhoto } from "@/lib/photo";
 import {
   itemsInList,
@@ -57,9 +58,11 @@ export default function Lists({
   const [photo, setPhoto] = useState("");
   const [review, setReview] = useState<DraftItem[] | null>(null);
   const pendingItemId = useRef<string | null>(null);
+  const [calendarItem, setCalendarItem] = useState<TaskItem | null>(null);
   const dirty = Boolean(
     itemText.trim() ||
     editingItemId ||
+    calendarItem ||
     photo ||
     review ||
     (formOpen &&
@@ -136,6 +139,7 @@ export default function Lists({
     setPhoto("");
     setReview(null);
     setImporting(false);
+    setCalendarItem(null);
     pendingItemId.current = null;
   }
   function openList(id: string | null) {
@@ -267,6 +271,7 @@ export default function Lists({
         .single();
       if (error) throw error;
       setItems((old) => old.filter((current) => current.id !== item.id));
+      if (calendarItem?.id === item.id) setCalendarItem(null);
       if (editingItemId === item.id) {
         setEditingItemId(null);
         setEditText("");
@@ -324,6 +329,7 @@ export default function Lists({
         .select("id");
       if (error) throw error;
       const removed = new Set(data.map((item) => item.id));
+      if (calendarItem && removed.has(calendarItem.id)) setCalendarItem(null);
       setItems((old) => old.filter((item) => !removed.has(item.id)));
       setStatus("Completed items deleted.");
     } catch (error) {
@@ -770,6 +776,16 @@ export default function Lists({
               )}
             </section>
           )}
+          {calendarItem && (
+            <CalendarReminder
+              key={calendarItem.id}
+              item={calendarItem}
+              listTitle={activeList.title}
+              onClose={() => setCalendarItem(null)}
+              onBusyChange={setBusy}
+              disabled={busy}
+            />
+          )}
           <div className="list-filters row spread">
             <label className="list-search">
               Search items
@@ -884,6 +900,26 @@ export default function Lists({
                       </button>
                     </>
                   )}
+                  <label className="inline-check calendar-trigger">
+                    <input
+                      type="checkbox"
+                      checked={calendarItem?.id === item.id}
+                      disabled={busy || importing || Boolean(editingItemId)}
+                      onChange={(e) => {
+                        if (!e.target.checked) {
+                          setCalendarItem(null);
+                          return;
+                        }
+                        if (
+                          calendarItem &&
+                          !confirm("Replace the current calendar draft?")
+                        )
+                          return;
+                        setCalendarItem(item);
+                      }}
+                    />{" "}
+                    Set up calendar reminder
+                  </label>
                   <button
                     className="text-button danger"
                     disabled={busy}
