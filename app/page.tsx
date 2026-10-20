@@ -16,6 +16,7 @@ import {
 import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
 import Lists from "./components/lists";
+import BatchPages from "./components/batch-pages";
 import { requestedListId } from "@/lib/list-calendar";
 import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
 
@@ -351,6 +352,7 @@ function Workspace({ session }: { session: Session }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [editor, setEditor] = useState(false);
+  const [batch, setBatch] = useState(false);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [photo, setPhoto] = useState("");
   const [raw, setRaw] = useState("");
@@ -428,11 +430,11 @@ function Workspace({ session }: { session: Session }) {
   }, [session.user.id]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      if (editor) e.preventDefault();
+      if (editor || batch) e.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [editor]);
+  }, [editor, batch]);
   const currentDiary = diaries.find((diary) => diary.id === activeDiaryId);
   const scopedPages = pagesInDiary(entries, currentDiary?.id || null);
   const loosePages = pagesInDiary(entries, null);
@@ -831,7 +833,7 @@ function Workspace({ session }: { session: Session }) {
           {area === "diaries" && (
             <button
               className="secondary"
-              disabled={busy}
+              disabled={busy || batch}
               onClick={() => setPreferences((p) => !p)}
             >
               Vocabulary
@@ -840,7 +842,7 @@ function Workspace({ session }: { session: Session }) {
           <button
             className="icon-button secondary"
             aria-label="Sign out"
-            disabled={busy || listBusy}
+            disabled={busy || listBusy || batch}
             onClick={async () => {
               if (
                 (editor || listDirty) &&
@@ -871,7 +873,7 @@ function Workspace({ session }: { session: Session }) {
             key={value}
             className={area === value ? "secondary view-active" : "secondary"}
             aria-pressed={area === value}
-            disabled={busy || listBusy}
+            disabled={busy || listBusy || batch}
             onClick={() => {
               if (area === value) return;
               if (
@@ -954,10 +956,10 @@ function Workspace({ session }: { session: Session }) {
                   rows={5}
                   value={vocabulary}
                   onChange={(e) => setVocabulary(e.target.value)}
-                  disabled={busy}
+                  disabled={busy || batch}
                 />
               </label>
-              <button disabled={busy} onClick={saveVocabulary}>
+              <button disabled={busy || batch} onClick={saveVocabulary}>
                 Save vocabulary
               </button>
             </section>
@@ -966,7 +968,7 @@ function Workspace({ session }: { session: Session }) {
             <div className="row spread diary-navigation">
               <button
                 className="text-button"
-                disabled={busy}
+                disabled={busy || batch}
                 onClick={() => enterDiary(null)}
               >
                 <ArrowLeft size={16} /> All diaries
@@ -975,7 +977,7 @@ function Workspace({ session }: { session: Session }) {
                 <div className="row">
                   <button
                     className="text-button"
-                    disabled={busy}
+                    disabled={busy || batch}
                     onClick={() => newDiary(currentDiary)}
                   >
                     Edit diary
@@ -983,7 +985,7 @@ function Workspace({ session }: { session: Session }) {
                   {loaded && !scopedPages.length && (
                     <button
                       className="text-button danger"
-                      disabled={busy}
+                      disabled={busy || batch}
                       onClick={() => deleteEmptyDiary(currentDiary)}
                     >
                       Delete empty diary
@@ -1003,7 +1005,7 @@ function Workspace({ session }: { session: Session }) {
                   maxLength={160}
                   value={diaryTitle}
                   onChange={(e) => setDiaryTitle(e.target.value)}
-                  disabled={busy}
+                  disabled={busy || batch}
                   placeholder="My 2026 diary"
                 />
               </label>
@@ -1014,7 +1016,7 @@ function Workspace({ session }: { session: Session }) {
                   rows={2}
                   value={diaryDescription}
                   onChange={(e) => setDiaryDescription(e.target.value)}
-                  disabled={busy}
+                  disabled={busy || batch}
                   placeholder="What belongs in this diary?"
                 />
               </label>
@@ -1044,7 +1046,7 @@ function Workspace({ session }: { session: Session }) {
                   <input
                     type="file"
                     accept="image/*"
-                    disabled={busy}
+                    disabled={busy || batch}
                     onChange={(e) => {
                       void chooseCover(e.target.files?.[0]);
                       e.target.value = "";
@@ -1055,7 +1057,7 @@ function Workspace({ session }: { session: Session }) {
                   <button
                     type="button"
                     className="text-button danger"
-                    disabled={busy}
+                    disabled={busy || batch}
                     onClick={() => {
                       setCoverPhoto("");
                       setRemoveCover(true);
@@ -1080,7 +1082,7 @@ function Workspace({ session }: { session: Session }) {
                 <button
                   type="button"
                   className="secondary"
-                  disabled={busy}
+                  disabled={busy || batch}
                   onClick={() => setDiaryForm(false)}
                 >
                   Cancel
@@ -1088,12 +1090,28 @@ function Workspace({ session }: { session: Session }) {
               </div>
             </form>
           )}
-          {editor ? (
+          {batch ? (
+            <BatchPages
+              session={session}
+              diaryId={currentDiary?.id || null}
+              startPage={nextPageNumber(entries, currentDiary?.id || null)}
+              onBusy={setBusy}
+              onSaved={() => {
+                setLoaded(false);
+                setRevision((r) => r + 1);
+              }}
+              onClose={() => {
+                setBatch(false);
+                setView("pages");
+                setRevision((r) => r + 1);
+              }}
+            />
+          ) : editor ? (
             <section className="panel">
               <div className="row spread">
                 <button
                   className="text-button"
-                  disabled={busy}
+                  disabled={busy || batch}
                   onClick={() => {
                     if (
                       confirm("Discard changes and return to your archive?")
@@ -1110,7 +1128,7 @@ function Workspace({ session }: { session: Session }) {
                 {selected && (
                   <button
                     className="danger text-button"
-                    disabled={busy}
+                    disabled={busy || batch}
                     onClick={() => remove(selected)}
                   >
                     <Trash2 size={16} /> Delete page
@@ -1144,7 +1162,7 @@ function Workspace({ session }: { session: Session }) {
                         <input
                           type="file"
                           accept="image/*"
-                          disabled={busy}
+                          disabled={busy || batch}
                           onChange={(e) => {
                             void scan(e.target.files?.[0]);
                             e.target.value = "";
@@ -1159,7 +1177,7 @@ function Workspace({ session }: { session: Session }) {
                     </>
                   )}
                   {photo && (
-                    <button disabled={busy} onClick={transcribe}>
+                    <button disabled={busy || batch} onClick={transcribe}>
                       {busy
                         ? "Please wait…"
                         : text
@@ -1182,7 +1200,7 @@ function Workspace({ session }: { session: Session }) {
                       maxLength={160}
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      disabled={busy}
+                      disabled={busy || batch}
                       placeholder="Give this page a name"
                     />
                   </label>
@@ -1190,7 +1208,7 @@ function Workspace({ session }: { session: Session }) {
                     Diary
                     <select
                       value={diaryId}
-                      disabled={busy}
+                      disabled={busy || batch}
                       onChange={(e) => {
                         setDiaryId(e.target.value);
                         setPage(
@@ -1215,7 +1233,7 @@ function Workspace({ session }: { session: Session }) {
                       <select
                         value={kind}
                         onChange={(e) => setKind(e.target.value as Kind)}
-                        disabled={busy}
+                        disabled={busy || batch}
                       >
                         {kinds.map((k) => (
                           <option key={k.value} value={k.value}>
@@ -1231,7 +1249,7 @@ function Workspace({ session }: { session: Session }) {
                         required
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
-                        disabled={busy}
+                        disabled={busy || batch}
                       />
                     </label>
                     <label>
@@ -1243,7 +1261,7 @@ function Workspace({ session }: { session: Session }) {
                         required
                         value={page}
                         onChange={(e) => setPage(Number(e.target.value))}
-                        disabled={busy}
+                        disabled={busy || batch}
                       />
                     </label>
                   </div>
@@ -1255,7 +1273,7 @@ function Workspace({ session }: { session: Session }) {
                       rows={14}
                       value={text}
                       onChange={(e) => setText(e.target.value)}
-                      disabled={busy}
+                      disabled={busy || batch}
                       placeholder="Your transcription appears here. You can also type a page yourself."
                     />
                   </label>
@@ -1298,7 +1316,7 @@ function Workspace({ session }: { session: Session }) {
                         Keep all the pages of a notebook together. You can
                         create as many diaries as you need.
                       </p>
-                      <button disabled={busy} onClick={() => newDiary()}>
+                      <button disabled={busy || batch} onClick={() => newDiary()}>
                         <Plus size={18} /> Create a diary
                       </button>
                     </div>
@@ -1310,7 +1328,7 @@ function Workspace({ session }: { session: Session }) {
                         <button
                           className="entry-card diary-card"
                           key={diary.id}
-                          disabled={busy}
+                          disabled={busy || batch}
                           onClick={() => enterDiary(diary.id)}
                         >
                           <DiaryCover
@@ -1333,7 +1351,7 @@ function Workspace({ session }: { session: Session }) {
                   </div>
                   <button
                     className="loose-pages secondary"
-                    disabled={busy}
+                    disabled={busy || batch}
                     onClick={() => enterDiary("loose")}
                   >
                     <span>Loose pages</span>
@@ -1369,6 +1387,16 @@ function Workspace({ session }: { session: Session }) {
                     </option>
                   ))}
                 </select>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setBatch(true);
+                    setStatus("");
+                  }}
+                  disabled={busy || !loaded}
+                >
+                  Add multiple pages
+                </button>
                 <button onClick={() => open(null)} disabled={busy || !loaded}>
                   <Plus size={18} /> Add a page
                 </button>
