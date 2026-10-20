@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { 
   Camera, Save, Sparkles, BookOpen, UserCheck, RefreshCw, 
   Archive, Clock, Lock, Unlock, Download, Copy, Check, Trash2, 
-  ChevronRight, ArrowLeft, BookMarked
+  ChevronRight, ArrowLeft, BookMarked, ArrowUp, ArrowDown
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -18,6 +18,7 @@ interface JournalEntry {
   image_url: string;
   raw_transcription: string;
   corrected_transcription: string;
+  page_number: number | null;
   created_at: string;
 }
 
@@ -33,6 +34,7 @@ export default function DiaryApp() {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [rawText, setRawText] = useState("");
   const [correctedText, setCorrectedText] = useState("");
+  const [pageNumberInput, setPageNumberInput] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [profile, setProfile] = useState<HandwritingProfile>({
@@ -40,7 +42,6 @@ export default function DiaryApp() {
     character_quirks: [],
   });
   
-  // Archive & Reader states
   const [pastEntries, setPastEntries] = useState<JournalEntry[]>([]);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showEntriesModal, setShowEntriesModal] = useState(false);
@@ -117,13 +118,44 @@ export default function DiaryApp() {
       const { data, error } = await supabase
         .from("entries")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("page_number", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: true });
 
       if (data && !error) {
         setPastEntries(data as JournalEntry[]);
+        setPageNumberInput(data.length + 1);
       }
     } catch (err) {
       console.error("Error loading entries from Supabase:", err);
+    }
+  };
+
+  const handleSwapOrder = async (indexA: number, indexB: number) => {
+    if (indexB < 0 || indexB >= pastEntries.length) return;
+    const entryA = pastEntries[indexA];
+    const entryB = pastEntries[indexB];
+
+    const orderA = entryB.page_number || indexB + 1;
+    const orderB = entryA.page_number || indexA + 1;
+
+    try {
+      await supabase.from("entries").update({ page_number: orderA }).eq("id", entryA.id);
+      await supabase.from("entries").update({ page_number: orderB }).eq("id", entryB.id);
+      await fetchEntries();
+    } catch (err) {
+      console.error("Error updating page order:", err);
+    }
+  };
+
+  const handleUpdatePageNumber = async (id: string, newPageNum: number) => {
+    try {
+      await supabase.from("entries").update({ page_number: newPageNum }).eq("id", id);
+      await fetchEntries();
+      if (selectedEntry?.id === id) {
+        setSelectedEntry((prev) => prev ? { ...prev, page_number: newPageNum } : null);
+      }
+    } catch (err) {
+      console.error("Error updating page number:", err);
     }
   };
 
@@ -178,7 +210,7 @@ export default function DiaryApp() {
 
       setRawText(data.text);
       setCorrectedText(data.text);
-      setStatusMessage("Transcribed! Review and correct any misread words below.");
+      setStatusMessage("Transcribed! Review text and confirm page number below.");
     } catch (err: any) {
       setStatusMessage(`Error: ${err.message}`);
     } finally {
@@ -218,10 +250,11 @@ export default function DiaryApp() {
         image_url: imagePreview || "",
         raw_transcription: rawText,
         corrected_transcription: correctedText,
+        page_number: pageNumberInput,
       });
 
       await fetchEntries();
-      setStatusMessage("Saved! Diary entry archived & handwriting memory permanently updated.");
+      setStatusMessage(`Saved! Page ${pageNumberInput} archived & handwriting memory updated.`);
     } catch (err: any) {
       setStatusMessage(`Error saving: ${err.message}`);
     } finally {
@@ -229,18 +262,11 @@ export default function DiaryApp() {
     }
   };
 
-  // Compile all entries into one chronological text block
   const getCompiledText = () => {
-    return [...pastEntries]
-      .reverse()
-      .map((entry) => {
-        const dateStr = new Date(entry.created_at).toLocaleDateString(undefined, {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
-        return `═══════════════════════════════════════\n${dateStr}\n═══════════════════════════════════════\n\n${entry.corrected_transcription}\n\n`;
+    return pastEntries
+      .map((entry, idx) => {
+        const displayPage = entry.page_number || idx + 1;
+        return `═══════════════════════════════════════\nPAGE ${displayPage}\n═══════════════════════════════════════\n\n${entry.corrected_transcription}\n\n`;
       })
       .join("\n");
   };
@@ -373,7 +399,16 @@ export default function DiaryApp() {
           <div className="bg-white p-5 rounded-lg border border-stone-200 shadow-sm flex flex-col">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-xs font-sans uppercase tracking-widest text-stone-400">Digital Version (Editable)</h2>
-              <span className="text-xs font-sans text-stone-400">Edits permanently adapt her model</span>
+              <div className="flex items-center gap-2 font-sans text-xs">
+                <span className="text-stone-500">Page #:</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={pageNumberInput}
+                  onChange={(e) => setPageNumberInput(parseInt(e.target.value) || 1)}
+                  className="w-16 px-2 py-0.5 border border-stone-300 rounded text-center text-stone-800 font-semibold"
+                />
+              </div>
             </div>
 
             <textarea
@@ -388,7 +423,7 @@ export default function DiaryApp() {
               disabled={loading || !correctedText}
               className="mt-4 bg-stone-900 hover:bg-stone-800 text-white py-2.5 rounded font-sans text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
             >
-              <Save size={16} /> {loading ? "Saving..." : "Save to Archive & Adapt AI"}
+              <Save size={16} /> {loading ? "Saving..." : `Save Page ${pageNumberInput} & Adapt AI`}
             </button>
           </div>
         </div>
@@ -406,11 +441,10 @@ export default function DiaryApp() {
         </div>
       )}
 
-      {/* Archive & Book Reader Modal */}
+      {/* Archive Modal */}
       {showEntriesModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 md:p-6 z-50">
           <div className="bg-[#FAF9F5] max-w-4xl w-full rounded-xl border border-stone-300 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
-            {/* Modal Header */}
             <div className="bg-white px-6 py-4 border-b border-stone-200 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 {archiveView !== "list" && (
@@ -428,7 +462,7 @@ export default function DiaryApp() {
                     {archiveView === "book" ? "Full Compiled Manuscript" : archiveView === "single" ? "Journal Page" : "Digitized Archive"}
                   </h3>
                   <p className="text-xs font-sans text-stone-400">
-                    {pastEntries.length} {pastEntries.length === 1 ? "page" : "pages"} digitized
+                    {pastEntries.length} {pastEntries.length === 1 ? "page" : "pages"} sorted in sequence
                   </p>
                 </div>
               </div>
@@ -470,9 +504,8 @@ export default function DiaryApp() {
               </div>
             </div>
 
-            {/* Modal Body */}
             <div className="overflow-y-auto p-6 flex-grow">
-              {/* VIEW 1: Cards List */}
+              {/* Cards List with Reordering Controls */}
               {archiveView === "list" && (
                 <div className="space-y-3">
                   {pastEntries.length === 0 ? (
@@ -480,61 +513,90 @@ export default function DiaryApp() {
                       No entries archived yet. Transcribe and save a page to see it here.
                     </div>
                   ) : (
-                    pastEntries.map((entry) => (
+                    pastEntries.map((entry, idx) => (
                       <div
                         key={entry.id}
                         onClick={() => {
                           setSelectedEntry(entry);
                           setArchiveView("single");
                         }}
-                        className="p-5 border border-stone-200 bg-white hover:border-stone-400 rounded-lg cursor-pointer transition shadow-xs group"
+                        className="p-4 border border-stone-200 bg-white hover:border-stone-400 rounded-lg cursor-pointer transition shadow-xs group flex items-start gap-4"
                       >
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-1.5 text-xs text-stone-500 font-sans">
-                            <Clock size={13} />
-                            {new Date(entry.created_at).toLocaleDateString(undefined, {
-                              weekday: "short",
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            })}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteEntry(entry.id);
-                              }}
-                              title="Delete entry"
-                              className="text-stone-300 hover:text-rose-600 p-1 transition"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                            <ChevronRight size={16} className="text-stone-300 group-hover:text-stone-700 transition" />
-                          </div>
+                        {/* Quick Page Reordering Controls */}
+                        <div 
+                          className="flex flex-col items-center justify-center bg-stone-50 border border-stone-200 rounded p-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            disabled={idx === 0}
+                            onClick={() => handleSwapOrder(idx, idx - 1)}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 transition"
+                            title="Move earlier"
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <span className="font-sans font-bold text-xs text-stone-700 my-0.5">
+                            p.{entry.page_number || idx + 1}
+                          </span>
+                          <button
+                            disabled={idx === pastEntries.length - 1}
+                            onClick={() => handleSwapOrder(idx, idx + 1)}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 transition"
+                            title="Move later"
+                          >
+                            <ArrowDown size={14} />
+                          </button>
                         </div>
-                        <p className="font-serif text-sm text-stone-800 whitespace-pre-wrap leading-relaxed line-clamp-3">
-                          {entry.corrected_transcription}
-                        </p>
+
+                        {/* Card Content */}
+                        <div className="flex-grow min-w-0">
+                          <div className="flex justify-between items-start mb-1.5">
+                            <div className="flex items-center gap-1.5 text-xs text-stone-500 font-sans">
+                              <Clock size={12} />
+                              {new Date(entry.created_at).toLocaleDateString(undefined, {
+                                weekday: "short",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteEntry(entry.id);
+                                }}
+                                title="Delete entry"
+                                className="text-stone-300 hover:text-rose-600 p-1 transition"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                              <ChevronRight size={16} className="text-stone-300 group-hover:text-stone-700 transition" />
+                            </div>
+                          </div>
+                          <p className="font-serif text-sm text-stone-800 whitespace-pre-wrap leading-relaxed line-clamp-2">
+                            {entry.corrected_transcription}
+                          </p>
+                        </div>
                       </div>
                     ))
                   )}
                 </div>
               )}
 
-              {/* VIEW 2: Single Entry Unabridged Inspector */}
+              {/* Single Entry Inspector */}
               {archiveView === "single" && selectedEntry && (
                 <div className="max-w-2xl mx-auto space-y-6">
                   <div className="flex justify-between items-center pb-3 border-b border-stone-200">
-                    <span className="text-xs font-sans text-stone-500 flex items-center gap-1">
-                      <Clock size={13} />
-                      {new Date(selectedEntry.created_at).toLocaleDateString(undefined, {
-                        weekday: "long",
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      })}
-                    </span>
+                    <div className="flex items-center gap-3 font-sans text-xs text-stone-600">
+                      <span>Page:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={selectedEntry.page_number || ""}
+                        onChange={(e) => handleUpdatePageNumber(selectedEntry.id, parseInt(e.target.value) || 1)}
+                        className="w-16 px-2 py-1 border border-stone-300 rounded text-center font-bold text-stone-800"
+                      />
+                    </div>
                     <button
                       onClick={() => handleDeleteEntry(selectedEntry.id)}
                       className="text-xs font-sans text-rose-600 hover:text-rose-800 flex items-center gap-1"
@@ -547,7 +609,7 @@ export default function DiaryApp() {
                     <div className="bg-white p-3 border border-stone-200 rounded-lg shadow-xs flex justify-center">
                       <img
                         src={selectedEntry.image_url}
-                        alt="Original handwritten page"
+                        alt="Original manuscript page"
                         className="max-h-[350px] w-auto object-contain rounded"
                       />
                     </div>
@@ -562,27 +624,29 @@ export default function DiaryApp() {
                 </div>
               )}
 
-              {/* VIEW 3: Compiled "Read as Book" Format */}
+              {/* Compiled Book View */}
               {archiveView === "book" && (
                 <div className="max-w-2xl mx-auto bg-white p-8 md:p-12 rounded-lg border border-stone-200 shadow-sm font-serif">
                   <div className="text-center mb-10 pb-6 border-b border-stone-200">
                     <h2 className="text-2xl font-normal text-stone-900 tracking-wide mb-1">Journal & Letters</h2>
-                    <p className="text-xs font-sans text-stone-400">Complete digitized chronological archive</p>
+                    <p className="text-xs font-sans text-stone-400">Complete manuscript in sequential order</p>
                   </div>
 
                   <div className="space-y-12">
-                    {[...pastEntries].reverse().map((entry, idx) => (
+                    {pastEntries.map((entry, idx) => (
                       <article key={entry.id} className="relative">
                         <div className="flex items-center gap-3 mb-4">
                           <span className="font-sans text-xs tracking-widest uppercase font-semibold text-stone-500">
+                            Page {entry.page_number || idx + 1}
+                          </span>
+                          <div className="flex-grow border-t border-stone-200" />
+                          <span className="text-xs font-sans text-stone-400">
                             {new Date(entry.created_at).toLocaleDateString(undefined, {
                               year: "numeric",
-                              month: "long",
+                              month: "short",
                               day: "numeric",
                             })}
                           </span>
-                          <div className="flex-grow border-t border-stone-200" />
-                          <span className="text-xs font-sans text-stone-300">p. {idx + 1}</span>
                         </div>
                         <p className="text-stone-900 leading-loose text-base whitespace-pre-wrap">
                           {entry.corrected_transcription}
@@ -597,7 +661,7 @@ export default function DiaryApp() {
         </div>
       )}
 
-      {/* Profile Memory Modal */}
+      {/* Memory Profile Modal */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white max-w-lg w-full rounded-lg p-6 border border-stone-200 font-sans">
