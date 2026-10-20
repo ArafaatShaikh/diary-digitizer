@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
+import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
 
 type Kind = "journal" | "note" | "letter" | "list";
 const kinds: { value: Kind; label: string }[] = [
@@ -24,6 +25,7 @@ const kinds: { value: Kind; label: string }[] = [
   { value: "list", label: "List" },
 ];
 type Entry = {
+  diary_id: string | null;
   id: string;
   title: string;
   kind: Kind;
@@ -289,6 +291,15 @@ function PagePhoto({ entry }: { entry: Entry }) {
 
 function Workspace({ session }: { session: Session }) {
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [diaries, setDiaries] = useState<Diary[]>([]);
+  // null = diary shelf; "loose" = pages not assigned to a diary.
+  const [activeDiaryId, setActiveDiaryId] = useState<string | null>(null);
+  const [diaryId, setDiaryId] = useState("");
+  const [diaryForm, setDiaryForm] = useState(false);
+  const [editingDiary, setEditingDiary] = useState<Diary | null>(null);
+  const [diaryTitle, setDiaryTitle] = useState("");
+  const [diaryDescription, setDiaryDescription] = useState("");
+  const [reading, setReading] = useState(false);
   const [revision, setRevision] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
@@ -311,6 +322,19 @@ function Workspace({ session }: { session: Session }) {
     async function loadEntries() {
       const pages: Entry[] = [];
       try {
+        const books: Diary[] = [];
+        for (let offset = 0; active; offset += 200) {
+          const { data, error } = await supabase
+            .from("diaries")
+            .select("id,title,description,created_at")
+            .eq("user_id", session.user.id)
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(offset, offset + 199);
+          if (error) throw error;
+          books.push(...(data || []));
+          if (!data || data.length < 200) break;
+        }
         for (let offset = 0; active; offset += 200) {
           const { data, error } = await supabase
             .from("entries")
@@ -326,6 +350,7 @@ function Workspace({ session }: { session: Session }) {
         }
         if (active) {
           setEntries(pages);
+          setDiaries(books);
           setLoaded(true);
         }
       } catch (error) {
@@ -364,6 +389,88 @@ function Workspace({ session }: { session: Session }) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [editor]);
+  const currentDiary = diaries.find((diary) => diary.id === activeDiaryId);
+  const scopedPages = pagesInDiary(entries, currentDiary?.id || null);
+  const loosePages = pagesInDiary(entries, null);
+  function enterDiary(id: string | null) {
+    setActiveDiaryId(id);
+    setQuery("");
+    setFilter("all");
+    setReading(false);
+    setDiaryForm(false);
+    setStatus("");
+  }
+  function newDiary(diary: Diary | null = null) {
+    setEditingDiary(diary);
+    setDiaryTitle(diary?.title || "");
+    setDiaryDescription(diary?.description || "");
+    setDiaryForm(true);
+    setStatus("");
+  }
+  async function saveDiary(event: FormEvent) {
+    event.preventDefault();
+    if (!diaryTitle.trim()) return;
+    setBusy(true);
+    try {
+      const record = {
+        title: diaryTitle.trim(),
+        description: diaryDescription.trim(),
+      };
+      const result = editingDiary
+        ? await supabase
+            .from("diaries")
+            .update(record)
+            .eq("id", editingDiary.id)
+            .eq("user_id", session.user.id)
+            .select("id,title,description,created_at")
+            .single()
+        : await supabase
+            .from("diaries")
+            .insert({ ...record, user_id: session.user.id })
+            .select("id,title,description,created_at")
+            .single();
+      if (result.error) throw result.error;
+      setDiaries((old) =>
+        editingDiary
+          ? old.map((diary) =>
+              diary.id === result.data.id ? result.data : diary,
+            )
+          : [result.data, ...old],
+      );
+      setDiaryForm(false);
+      enterDiary(result.data.id);
+      setStatus(
+        editingDiary ? "Diary updated." : "Diary created. Add its first page.",
+      );
+    } catch (error) {
+      setStatus(`Could not save diary: ${message(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteEmptyDiary(diary: Diary) {
+    if (!confirm(`Delete the empty diary “${diary.title}”?`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from("diaries")
+        .delete()
+        .eq("id", diary.id)
+        .eq("user_id", session.user.id)
+        .select("id")
+        .single();
+      if (error) throw error;
+      setDiaries((old) => old.filter((book) => book.id !== diary.id));
+      enterDiary(null);
+      setStatus("Empty diary deleted.");
+    } catch {
+      setStatus(
+        "Could not delete this diary. If it contains pages, move them first and reload.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   function open(entry: Entry | null) {
     if (editor && !confirm("Discard the current draft?")) return;
     setSelected(entry);
@@ -373,7 +480,9 @@ function Workspace({ session }: { session: Session }) {
     setTitle(entry?.title || "");
     setKind(entry?.kind || "journal");
     setDate(entry?.entry_date || localDate());
-    setPage(entry?.page_number || entries.length + 1);
+    const target = entry ? entry.diary_id || "" : currentDiary?.id || "";
+    setDiaryId(target);
+    setPage(entry?.page_number || nextPageNumber(entries, target || null));
     setEditor(true);
     setStatus("");
   }
@@ -454,6 +563,7 @@ function Workspace({ session }: { session: Session }) {
         kind,
         entry_date: date,
         page_number: page,
+        diary_id: diaryId || null,
         raw_transcription: raw,
         corrected_transcription: text,
         image_path: imagePath,
@@ -479,6 +589,9 @@ function Workspace({ session }: { session: Session }) {
       setPhoto("");
       setText("");
       setRaw("");
+      setLoaded(false);
+      setActiveDiaryId(diaryId || "loose");
+      setReading(false);
       setRevision((r) => r + 1);
       setStatus("Page saved to your archive.");
     } catch (error) {
@@ -559,7 +672,7 @@ function Workspace({ session }: { session: Session }) {
     if (!error) setPreferences(false);
   }
   function download() {
-    const content = entries
+    const content = scopedPages
       .map(
         (e) =>
           `${e.title}\n${e.entry_date} · ${e.kind} · Page ${e.page_number || "?"}\n\n${e.corrected_transcription}`,
@@ -570,11 +683,11 @@ function Workspace({ session }: { session: Session }) {
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = `my-pages-${localDate()}.txt`;
+    link.download = `${(currentDiary?.title || "loose-pages").replace(/[^a-zA-Z0-9_-]/g, "_")}-${localDate()}.txt`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const visible = entries.filter(
+  const visible = scopedPages.filter(
     (e) =>
       (filter === "all" || e.kind === filter) &&
       `${e.title} ${e.corrected_transcription} ${e.entry_date}`
@@ -611,9 +724,23 @@ function Workspace({ session }: { session: Session }) {
         </div>
       </header>
       <div className="intro">
-        <p className="eyebrow">Your private collection</p>
-        <h1>A home for your handwritten pages.</h1>
-        <p>Notes, letters, lists, and the days you want to remember.</p>
+        <p className="eyebrow">
+          {activeDiaryId === null
+            ? "Your private collection"
+            : "Your handwritten pages"}
+        </p>
+        <h1>
+          {currentDiary?.title ||
+            (activeDiaryId === "loose"
+              ? "Loose pages"
+              : "Your diaries, together.")}
+        </h1>
+        <p>
+          {currentDiary?.description ||
+            (activeDiaryId === "loose"
+              ? "Pages waiting for a diary. Open a page to file it."
+              : "A diary for every notebook, year, or part of your life.")}
+        </p>
         <p className="small">Signed in as {session.user.email}</p>
       </div>
       {status && (
@@ -641,6 +768,77 @@ function Workspace({ session }: { session: Session }) {
             Save vocabulary
           </button>
         </section>
+      )}
+      {!editor && activeDiaryId !== null && (
+        <div className="row spread diary-navigation">
+          <button
+            className="text-button"
+            disabled={busy}
+            onClick={() => enterDiary(null)}
+          >
+            <ArrowLeft size={16} /> All diaries
+          </button>
+          {currentDiary && (
+            <div className="row">
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={() => newDiary(currentDiary)}
+              >
+                Edit diary
+              </button>
+              {loaded && !scopedPages.length && (
+                <button
+                  className="text-button danger"
+                  disabled={busy}
+                  onClick={() => deleteEmptyDiary(currentDiary)}
+                >
+                  Delete empty diary
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {diaryForm && !editor && (
+        <form className="panel stack" onSubmit={saveDiary}>
+          <h2>{editingDiary ? "Edit diary" : "Create a diary"}</h2>
+          <label>
+            Diary name
+            <input
+              required
+              maxLength={160}
+              value={diaryTitle}
+              onChange={(e) => setDiaryTitle(e.target.value)}
+              disabled={busy}
+              placeholder="My 2026 diary"
+            />
+          </label>
+          <label>
+            Description (optional)
+            <textarea
+              maxLength={500}
+              rows={2}
+              value={diaryDescription}
+              onChange={(e) => setDiaryDescription(e.target.value)}
+              disabled={busy}
+              placeholder="What belongs in this diary?"
+            />
+          </label>
+          <div className="row">
+            <button disabled={busy || !diaryTitle.trim()}>
+              {busy ? "Saving…" : editingDiary ? "Save diary" : "Create diary"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setDiaryForm(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
       {editor ? (
         <section className="panel">
@@ -738,6 +936,29 @@ function Workspace({ session }: { session: Session }) {
                   placeholder="Give this page a name"
                 />
               </label>
+              <label>
+                Diary
+                <select
+                  value={diaryId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setDiaryId(e.target.value);
+                    setPage(
+                      nextPageNumber(
+                        entries.filter((item) => item.id !== selected?.id),
+                        e.target.value || null,
+                      ),
+                    );
+                  }}
+                >
+                  <option value="">Loose pages (no diary)</option>
+                  {diaries.map((diary) => (
+                    <option key={diary.id} value={diary.id}>
+                      {diary.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="field-grid">
                 <label>
                   Save as
@@ -798,13 +1019,85 @@ function Workspace({ session }: { session: Session }) {
             </form>
           </div>
         </section>
+      ) : activeDiaryId === null ? (
+        <section aria-label="Your diaries">
+          <div className="row spread shelf-heading">
+            <p className="small">
+              {loaded
+                ? `${diaries.length} ${diaries.length === 1 ? "diary" : "diaries"}`
+                : "Loading your collection…"}
+            </p>
+            <button disabled={busy || !loaded} onClick={() => newDiary()}>
+              <Plus size={18} /> New diary
+            </button>
+          </div>
+          {!loaded ? (
+            <button
+              className="secondary"
+              onClick={() => setRevision((r) => r + 1)}
+            >
+              Reload collection
+            </button>
+          ) : (
+            <>
+              {!diaries.length && (
+                <div className="empty">
+                  <BookOpen size={42} />
+                  <h2>Create your first diary.</h2>
+                  <p>
+                    Keep all the pages of a notebook together. You can create as
+                    many diaries as you need.
+                  </p>
+                  <button disabled={busy} onClick={() => newDiary()}>
+                    <Plus size={18} /> Create a diary
+                  </button>
+                </div>
+              )}
+              <div className="cards diary-shelf">
+                {diaries.map((diary) => {
+                  const pages = pagesInDiary(entries, diary.id);
+                  return (
+                    <button
+                      className="entry-card diary-card"
+                      key={diary.id}
+                      disabled={busy}
+                      onClick={() => enterDiary(diary.id)}
+                    >
+                      <BookOpen size={28} />
+                      <h2>{diary.title}</h2>
+                      <p>
+                        {diary.description ||
+                          "Your handwritten pages, kept together."}
+                      </p>
+                      <span className="small">
+                        {pages.length} {pages.length === 1 ? "page" : "pages"} ·
+                        Open diary →
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                className="loose-pages secondary"
+                disabled={busy}
+                onClick={() => enterDiary("loose")}
+              >
+                <span>Loose pages</span>
+                <span>
+                  {loosePages.length}{" "}
+                  {loosePages.length === 1 ? "page" : "pages"} · Open →
+                </span>
+              </button>
+            </>
+          )}
+        </section>
       ) : (
         <>
           <div className="toolbar">
             <label className="search">
               <Search size={18} />
               <input
-                aria-label="Search your pages"
+                aria-label="Search this diary"
                 placeholder="Search titles, words, or dates"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -822,49 +1115,74 @@ function Workspace({ session }: { session: Session }) {
                 </option>
               ))}
             </select>
-            <button onClick={() => open(null)} disabled={busy}>
+            <button onClick={() => open(null)} disabled={busy || !loaded}>
               <Plus size={18} /> Add a page
             </button>
           </div>
           <div className="row spread">
             <p className="small">
               {loaded
-                ? `${entries.length} saved ${entries.length === 1 ? "page" : "pages"}`
-                : "Loading your archive…"}
+                ? `${scopedPages.length} saved ${scopedPages.length === 1 ? "page" : "pages"}`
+                : "Loading your pages…"}
             </p>
-            <button
-              className="text-button"
-              onClick={download}
-              disabled={!loaded || !entries.length}
-            >
-              <Download size={16} /> Export all text
-            </button>
+            <div className="row">
+              <button
+                className="text-button"
+                disabled={!loaded || !scopedPages.length}
+                onClick={() => setReading((value) => !value)}
+              >
+                <BookOpen size={16} /> {reading ? "Page cards" : "Read as book"}
+              </button>
+              <button
+                className="text-button"
+                onClick={download}
+                disabled={!loaded || !scopedPages.length}
+              >
+                <Download size={16} /> Export{" "}
+                {currentDiary ? "diary" : "loose pages"}
+              </button>
+            </div>
           </div>
           {!loaded ? (
             <button
               className="secondary"
               onClick={() => setRevision((r) => r + 1)}
             >
-              Reload archive
+              Reload pages
             </button>
           ) : !visible.length ? (
             <section className="empty">
               <BookOpen size={42} />
               <h2>
-                {entries.length
+                {scopedPages.length
                   ? "No matching pages"
                   : "Your first page starts here."}
               </h2>
               <p>
-                {entries.length
+                {scopedPages.length
                   ? "Try a different search or type."
                   : "Take a photo of your notebook, review the words, and save."}
               </p>
-              {!entries.length && (
+              {!scopedPages.length && (
                 <button onClick={() => open(null)}>
                   <Camera size={18} /> Add your first page
                 </button>
               )}
+            </section>
+          ) : reading ? (
+            <section className="book-reader" aria-label="Read diary">
+              {visible.map((entry) => (
+                <article key={entry.id} className="book-page">
+                  <p className="eyebrow">
+                    Page {entry.page_number || "—"} · {entry.entry_date}
+                  </p>
+                  <h2>{entry.title || "Untitled page"}</h2>
+                  <p className="book-text">{entry.corrected_transcription}</p>
+                  <button className="text-button" onClick={() => open(entry)}>
+                    Edit page {entry.page_number || ""} →
+                  </button>
+                </article>
+              ))}
             </section>
           ) : (
             <div className="cards">

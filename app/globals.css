@@ -397,3 +397,47 @@ footer {
     padding: 20px;
   }
 }
+
+.shelf-heading {
+  margin: 0 0 24px;
+}
+.diary-shelf {
+  margin-top: 24px;
+}
+.diary-card {
+  border-left: 7px solid var(--accent);
+  min-height: 240px;
+}
+.diary-card > svg {
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.loose-pages {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 26px;
+  text-align: left;
+  flex-wrap: wrap;
+}
+.diary-navigation {
+  margin-bottom: 18px;
+}
+.book-reader {
+  max-width: 760px;
+  margin: 20px auto;
+}
+.book-page {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: clamp(22px, 5vw, 55px);
+  margin: 0 0 24px;
+}
+.book-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.9;
+  font-size: 1.1rem;
+}
