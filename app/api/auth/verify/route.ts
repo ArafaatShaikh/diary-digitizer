@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
-
 export async function POST(req: NextRequest) {
   try {
     const { passcode } = await req.json();
     
-    // Strip accidental quotes or surrounding spaces from Vercel UI
+    // Strip accidental quotes or surrounding spaces
     const rawPasscode = process.env.APP_PASSCODE || "1234";
     const serverPasscode = rawPasscode.replace(/^["']|["']$/g, "").trim();
 
