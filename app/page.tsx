@@ -40,7 +40,7 @@ export default function DiaryApp() {
   const [showEntriesModal, setShowEntriesModal] = useState(false);
 
   useEffect(() => {
-    const savedAuth = localStorage.getItem("diary_authenticated");
+    const savedAuth = sessionStorage.getItem("diary_authenticated");
     if (savedAuth === "true") {
       setIsAuthenticated(true);
       fetchProfile();
@@ -64,7 +64,7 @@ export default function DiaryApp() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        localStorage.setItem("diary_authenticated", "true");
+        sessionStorage.setItem("diary_authenticated", "true");
         setIsAuthenticated(true);
         fetchProfile();
         fetchEntries();
@@ -79,7 +79,7 @@ export default function DiaryApp() {
   };
 
   const handleLock = () => {
-    localStorage.removeItem("diary_authenticated");
+    sessionStorage.removeItem("diary_authenticated");
     setIsAuthenticated(false);
     setPasscode("");
   };
