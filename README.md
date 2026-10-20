@@ -99,3 +99,11 @@ Database tests use an in-memory PostgreSQL runtime with minimal Supabase auth/st
 ## Rollback
 
 Do not roll back database ownership policies to permissive access. The migration preserves old columns and entries, but the previous shared-passcode app cannot authenticate against the new private policies. If the new UI must be withdrawn, restrict app access while fixing it rather than reopening diary rows. Restore data only from a reviewed backup if required.
+
+## Multiple-photo diary pages
+
+Open a diary (or Loose pages) and choose **Add multiple pages**. Select up to ten photos, reorder them with the arrow buttons, and choose the starting page number and written date. **Read unread photos** sends one photo at a time through the existing authenticated transcription endpoint; each attempt uses the shared daily allowance. Processing stops on an error and retry skips already transcribed or manually typed pages. Review/edit each page and tick its confirmation before saving.
+
+Saving runs page by page, shows successful pages, and retains remaining drafts after errors. Stable row IDs prevent duplicate rows when retrying an uncertain response. Ordering, date, and numbering lock once saving starts. Back to diary verifies saved image references before removing known uploads belonging only to abandoned drafts. Drafts are held in memory: closing/reloading the browser can lose unsaved work and leave uploaded files for owner cleanup, especially after uncertain upload responses. No new migration, environment variable, or hosting service is required.
+
+The interface uses warm ivory paper, navy text, and terracotta controls.
