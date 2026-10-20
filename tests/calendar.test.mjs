@@ -153,3 +153,34 @@ test("invalid dates, times, durations, identifiers, and alerts do not produce fi
   ])
     assert.throws(() => buildCalendarEvent({ ...base, ...change }));
 });
+
+test("whole-list events support a URL field and long descriptions without extra events", () => {
+  const description = Array.from(
+    { length: 200 },
+    (_, i) => `[ ] Item ${i}: ${"a".repeat(30)}`,
+  ).join("\n");
+  const file = unfold(
+    buildCalendarEvent({
+      ...base,
+      itemId: "list-123",
+      title: "Shopping",
+      description,
+      url: "https://example.com/?list=123",
+    }),
+  );
+  assert.ok(file.includes("URL:https://example.com/?list=123"));
+  assert.ok(file.includes("Item 199:"));
+  assert.equal(
+    file.split("\r\n").filter((line) => line === "BEGIN:VEVENT").length,
+    1,
+  );
+  for (const url of [
+    "javascript:alert(1)",
+    "https://user:password@example.com",
+    "https://example.com/\r\nBEGIN:VEVENT",
+  ])
+    assert.throws(() => buildCalendarEvent({ ...base, url }));
+  assert.throws(() =>
+    buildCalendarEvent({ ...base, description: "a".repeat(250001) }),
+  );
+});

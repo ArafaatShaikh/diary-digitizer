@@ -5,32 +5,39 @@ import {
   calendarStartOptions,
   type StartOption,
 } from "@/lib/calendar";
-import type { TaskItem } from "@/lib/list-data";
+import type { TaskItem, TaskList } from "@/lib/list-data";
+import {
+  listCalendarDescription,
+  type CalendarContents,
+} from "@/lib/list-calendar";
 
 export default function CalendarReminder({
-  item,
-  listTitle,
+  list,
+  items,
+  appUrl,
   onClose,
   onBusyChange,
   disabled,
 }: {
-  item: TaskItem;
-  listTitle: string;
+  list: TaskList;
+  items: TaskItem[];
+  appUrl: string;
   onClose: () => void;
   onBusyChange: (busy: boolean) => void;
   disabled: boolean;
 }) {
-  const [title, setTitle] = useState(item.text);
+  const [title, setTitle] = useState(list.title);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [duration, setDuration] = useState(30);
   const [reminder, setReminder] = useState<number | null>(0);
   const [location, setLocation] = useState("");
-  const [notes, setNotes] = useState(
-    `From my list: ${listTitle}\n\n${item.text}`,
-  );
+  const [notes, setNotes] = useState("");
+  const [contentsMode, setContentsMode] = useState<CalendarContents>("both");
   const [occurrence, setOccurrence] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmedSignature, setConfirmedSignature] = useState<string | null>(
+    null,
+  );
   const [status, setStatus] = useState("");
   const [sharing, setSharing] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -64,23 +71,48 @@ export default function CalendarReminder({
     dateStyle: "medium",
     timeStyle: "short",
   });
+  const description = listCalendarDescription({
+    title: list.title,
+    items,
+    mode: contentsMode,
+    appUrl,
+    notes,
+  });
+  const signature = JSON.stringify([
+    title,
+    date,
+    time,
+    duration,
+    reminder,
+    location,
+    description,
+    occurrence,
+    selected,
+    zone,
+  ]);
+  const confirmed = confirmedSignature === signature;
   function changed() {
-    setConfirmed(false);
+    setConfirmedSignature(null);
     setStatus("");
   }
   function eventFile() {
     if (!confirmed || !start || !end)
       throw new Error("Confirm the event date, time, and duration first.");
+    if (description.length > 250000)
+      throw new Error(
+        "This list is too large to copy into one event. Choose App link only.",
+      );
     const contents = buildCalendarEvent({
-      itemId: item.id,
+      itemId: `list-${list.id}`,
       title,
       start,
       durationMinutes: duration,
       reminderMinutes: reminder,
-      description: notes,
+      description,
+      url: contentsMode === "contents" ? undefined : appUrl,
       location,
     });
-    return new File([contents], "calendar-reminder.ics", {
+    return new File([contents], "list-reminder.ics", {
       type: "text/calendar;charset=utf-8",
     });
   }
@@ -135,10 +167,10 @@ export default function CalendarReminder({
       className="panel stack calendar-reminder"
       ref={form}
       onSubmit={download}
-      aria-label="Set up calendar reminder"
+      aria-label="Set up list reminder"
     >
       <div className="row spread">
-        <h2>Set up calendar reminder</h2>
+        <h2>Set up list reminder</h2>
         <button
           type="button"
           className="text-button"
@@ -152,6 +184,31 @@ export default function CalendarReminder({
         Choose the details, then download or share an event file and save it in
         your calendar. This checkbox opens setup; it does not turn on an alarm.
       </p>
+      <label>
+        Include in the calendar event
+        <select
+          value={contentsMode}
+          disabled={sharing || disabled}
+          onChange={(e) => {
+            setContentsMode(e.target.value as CalendarContents);
+            changed();
+          }}
+        >
+          <option value="both">App link and all list items</option>
+          <option value="link">App link only</option>
+          <option value="contents">All list items only</option>
+        </select>
+      </label>
+      <p className="small">
+        All {items.length} saved items are included when copying contents, even
+        if hidden by search or Show completed. Copied contents are a snapshot.
+        The app link opens the current private list and requires its owner to
+        sign in.
+      </p>
+      <details className="calendar-details">
+        <summary>Preview what the event includes</summary>
+        <pre className="calendar-content-preview">{description}</pre>
+      </details>
       <label>
         Event title
         <input
@@ -325,7 +382,9 @@ export default function CalendarReminder({
           required
           checked={confirmed}
           disabled={sharing || disabled || !start || !end}
-          onChange={(e) => setConfirmed(e.target.checked)}
+          onChange={(e) =>
+            setConfirmedSignature(e.target.checked ? signature : null)
+          }
         />{" "}
         I checked the date, time, duration, and alert.
       </label>

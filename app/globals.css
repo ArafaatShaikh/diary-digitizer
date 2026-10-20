@@ -689,21 +689,11 @@ footer {
 .calendar-summary p {
   margin: 8px 0 0;
 }
-.calendar-trigger {
-  font-size: 0.78rem;
-  font-weight: 400;
-  min-height: 40px;
-}
 .task-row {
   flex-wrap: wrap;
 }
 .task-text {
   min-width: 130px;
-}
-@media (max-width: 520px) {
-  .calendar-trigger {
-    margin-left: 38px;
-  }
 }
 
 .calendar-details summary {
@@ -714,4 +704,26 @@ footer {
 }
 .calendar-details > .stack {
   padding-top: 12px;
+}
+
+.list-calendar-action {
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  padding: 16px 18px;
+  border-radius: 8px;
+  background: white;
+}
+.list-calendar-action p {
+  margin: 0;
+}
+.calendar-content-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 250px;
+  overflow-y: auto;
+  background: #f4f6ef;
+  border-radius: 6px;
+  padding: 16px;
+  font: inherit;
+  font-size: 0.85rem;
 }

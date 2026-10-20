@@ -100,6 +100,7 @@ export function buildCalendarEvent({
   description = "",
   location = "",
   now = new Date(),
+  url,
 }: {
   itemId: string;
   title: string;
@@ -109,13 +110,14 @@ export function buildCalendarEvent({
   description?: string;
   location?: string;
   now?: Date;
+  url?: string;
 }): string {
   if (!/^[a-zA-Z0-9-]{1,100}$/.test(itemId))
     throw new Error("Invalid task identifier.");
   if (
     !title.trim() ||
     title.length > 1000 ||
-    description.length > 5000 ||
+    description.length > 250000 ||
     location.length > 500
   )
     throw new Error("Check the event title, notes, and location.");
@@ -145,6 +147,18 @@ export function buildCalendarEvent({
     `DTEND:${timestamp(end)}`,
     `SUMMARY:${escapeText(title.trim())}`,
   ];
+  if (url) {
+    if (/[\r\n\u0000-\u0020]/.test(url) || url.length > 2048)
+      throw new Error("Invalid calendar link.");
+    const parsed = new URL(url);
+    if (
+      !["https:", "http:"].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password
+    )
+      throw new Error("Invalid calendar link.");
+    lines.push(`URL:${parsed.href}`);
+  }
   if (description.trim())
     lines.push(`DESCRIPTION:${escapeText(description.trim())}`);
   if (location.trim()) lines.push(`LOCATION:${escapeText(location.trim())}`);
