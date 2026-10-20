@@ -16,6 +16,7 @@ import {
 import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
 import Lists from "./components/lists";
+import { requestedListId } from "@/lib/list-calendar";
 import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
 
 type Kind = "journal" | "note" | "letter" | "list";
@@ -322,7 +323,11 @@ function DiaryCover({ diary }: { diary: Diary }) {
 }
 
 function Workspace({ session }: { session: Session }) {
-  const [area, setArea] = useState<"diaries" | "lists">("diaries");
+  const [area, setArea] = useState<"diaries" | "lists">(() =>
+    typeof window !== "undefined" && requestedListId(window.location.search)
+      ? "lists"
+      : "diaries",
+  );
   const [listDirty, setListDirty] = useState(false);
   const [listBusy, setListBusy] = useState(false);
   const [accountStatus, setAccountStatus] = useState("");
@@ -883,6 +888,11 @@ function Workspace({ session }: { session: Session }) {
               setCoverPhoto("");
               setListDirty(false);
               setListBusy(false);
+              if (value === "diaries") {
+                const address = new URL(window.location.href);
+                address.searchParams.delete("list");
+                window.history.replaceState(null, "", address.href);
+              }
               setArea(value);
             }}
           >

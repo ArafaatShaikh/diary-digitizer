@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import CalendarReminder from "./calendar-reminder";
+import { listAppUrl, requestedListId } from "@/lib/list-calendar";
 import { preparePhoto } from "@/lib/photo";
 import {
   itemsInList,
@@ -40,7 +41,11 @@ export default function Lists({
 }) {
   const [lists, setLists] = useState<TaskList[]>([]);
   const [items, setItems] = useState<TaskItem[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() =>
+    typeof window !== "undefined"
+      ? requestedListId(window.location.search)
+      : null,
+  );
   const [loaded, setLoaded] = useState(false);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -58,11 +63,11 @@ export default function Lists({
   const [photo, setPhoto] = useState("");
   const [review, setReview] = useState<DraftItem[] | null>(null);
   const pendingItemId = useRef<string | null>(null);
-  const [calendarItem, setCalendarItem] = useState<TaskItem | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const dirty = Boolean(
     itemText.trim() ||
     editingItemId ||
-    calendarItem ||
+    calendarOpen ||
     photo ||
     review ||
     (formOpen &&
@@ -139,13 +144,20 @@ export default function Lists({
     setPhoto("");
     setReview(null);
     setImporting(false);
-    setCalendarItem(null);
+    setCalendarOpen(false);
     pendingItemId.current = null;
+  }
+  function updateListAddress(id: string | null) {
+    const address = new URL(window.location.href);
+    if (id) address.searchParams.set("list", id);
+    else address.searchParams.delete("list");
+    window.history.replaceState(null, "", address.href);
   }
   function openList(id: string | null) {
     if (dirty && !confirm("Discard your unsaved list changes?")) return;
     resetDrafts();
     setActiveId(id);
+    updateListAddress(id);
     setQuery("");
     setStatus("");
     setShowCompleted(true);
@@ -186,6 +198,7 @@ export default function Lists({
       );
       resetDrafts();
       setActiveId(result.data.id);
+      updateListAddress(result.data.id);
       setQuery("");
       setStatus(
         editingList
@@ -271,7 +284,6 @@ export default function Lists({
         .single();
       if (error) throw error;
       setItems((old) => old.filter((current) => current.id !== item.id));
-      if (calendarItem?.id === item.id) setCalendarItem(null);
       if (editingItemId === item.id) {
         setEditingItemId(null);
         setEditText("");
@@ -305,6 +317,7 @@ export default function Lists({
       setItems((old) => old.filter((item) => item.list_id !== activeList.id));
       resetDrafts();
       setActiveId(null);
+      updateListAddress(null);
       setStatus("List deleted.");
     } catch (error) {
       setStatus(`Could not delete list: ${message(error)}`);
@@ -329,7 +342,6 @@ export default function Lists({
         .select("id");
       if (error) throw error;
       const removed = new Set(data.map((item) => item.id));
-      if (calendarItem && removed.has(calendarItem.id)) setCalendarItem(null);
       setItems((old) => old.filter((item) => !removed.has(item.id)));
       setStatus("Completed items deleted.");
     } catch (error) {
@@ -596,6 +608,18 @@ export default function Lists({
         </p>
       ) : (
         <>
+          <div className="row spread list-calendar-action">
+            <p className="small">One event for the whole list.</p>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={calendarOpen}
+                disabled={busy || importing || Boolean(editingItemId)}
+                onChange={(e) => setCalendarOpen(e.target.checked)}
+              />{" "}
+              Set up reminder for this list
+            </label>
+          </div>
           {!importing && (
             <>
               <form className="panel add-item-form" onSubmit={addItem}>
@@ -613,10 +637,10 @@ export default function Lists({
                     onChange={(e) => {
                       setItemText(e.target.value);
                     }}
-                    disabled={busy}
+                    disabled={busy || calendarOpen}
                   />
                 </label>
-                <button disabled={busy || !itemText.trim()}>
+                <button disabled={busy || calendarOpen || !itemText.trim()}>
                   <Plus size={18} /> Add item
                 </button>
               </form>
@@ -626,7 +650,7 @@ export default function Lists({
                 </p>
                 <button
                   className="secondary"
-                  disabled={busy || Boolean(editingItemId)}
+                  disabled={busy || calendarOpen || Boolean(editingItemId)}
                   onClick={() => {
                     setImporting(true);
                     setStatus("");
@@ -776,12 +800,13 @@ export default function Lists({
               )}
             </section>
           )}
-          {calendarItem && (
+          {calendarOpen && (
             <CalendarReminder
-              key={calendarItem.id}
-              item={calendarItem}
-              listTitle={activeList.title}
-              onClose={() => setCalendarItem(null)}
+              key={activeList.id}
+              list={activeList}
+              items={listItems}
+              appUrl={listAppUrl(window.location.origin, activeList.id)}
+              onClose={() => setCalendarOpen(false)}
               onBusyChange={setBusy}
               disabled={busy}
             />
@@ -900,26 +925,6 @@ export default function Lists({
                       </button>
                     </>
                   )}
-                  <label className="inline-check calendar-trigger">
-                    <input
-                      type="checkbox"
-                      checked={calendarItem?.id === item.id}
-                      disabled={busy || importing || Boolean(editingItemId)}
-                      onChange={(e) => {
-                        if (!e.target.checked) {
-                          setCalendarItem(null);
-                          return;
-                        }
-                        if (
-                          calendarItem &&
-                          !confirm("Replace the current calendar draft?")
-                        )
-                          return;
-                        setCalendarItem(item);
-                      }}
-                    />{" "}
-                    Set up calendar reminder
-                  </label>
                   <button
                     className="text-button danger"
                     disabled={busy}
