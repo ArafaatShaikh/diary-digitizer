@@ -2,6 +2,16 @@
 
 A mobile web app for photographing handwritten pages, reviewing Gemini transcriptions, and keeping private journals, notes, letters, and lists. Source stays in GitHub, Vercel serves the app, and Supabase handles accounts, database rows, and private photos. No laptop server is needed.
 
+## Calendar reminders from list items
+
+This update needs **no Supabase migration, new API key, or paid service**. Each saved list item has a **Set up calendar reminder** checkbox. Checking it opens a calendar draft with an editable title, blank date/time fields, duration, and an optional calendar alert (at the event time or before it). Location and notes are optional. Confirm the reviewed details, then select **Download calendar file** or **Share calendar file** where device/browser file sharing is supported.
+
+The checkbox opens setup; it is not a saved/active reminder flag. Calendar drafts are not stored in this app. Open the generated `.ics` file in a compatible calendar, review/import it, and save. Verify that the calendar retained the requested alert: import and notification handling depend on the target app and its settings. If downloading/sharing is not offered by the phone's calendar, transfer the file to a device/calendar that supports import. This feature does not schedule a background job, create a phone alarm, mark a task complete, send attendees invitations, or synchronise/update/delete previously imported events. Closing or unchecking setup cannot cancel an event already saved in a calendar.
+
+Date/time interpretation uses the device's current time zone. The preview displays its zone/offset and event start/end. Nonexistent local times during clock changes are rejected, and repeated times require choosing an offset. Event start/end are exported as UTC instants with the chosen elapsed duration. Dates are never inferred from task text or sent to Gemini for this flow. File generation happens entirely on the device; the export does not send event details to the app backend or Google. The user controls the destination of native sharing.
+
+The exporter follows [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545.html), including CRLF line endings, UTF-8-safe 75-octet folding, escaped text, and an optional display alarm. Automated tests cover event identity/duration/alerts, text-injection prevention, Bengali/emoji folding, invalid inputs, and daylight-saving transitions in several zones. They do not verify native calendar import or alarm delivery on an actual phone.
+
 ## Interactive to-do and shopping lists
 
 Run only [`supabase/migrations/202610200004_interactive_lists.sql`](supabase/migrations/202610200004_interactive_lists.sql) in the existing Supabase project's SQL Editor before deploying this update. Do not reset/truncate anything. It adds owner-only `task_lists` and `task_items` tables, with a composite foreign key to prevent cross-account item assignment. Deleting a list deletes its own items, after an explicit confirmation in the UI. Existing diaries, photos, and old text pages with the List category are unchanged.
@@ -70,7 +80,7 @@ Do not assign every old row to whoever signs up first. Move personal vocabulary 
 
 Included: individual accounts, password recovery, private photos and rows, original/corrected text, page numbering, titles/dates/types, archive search/filtering, per-user vocabulary, text export, deletion, mobile layout, and a Home Screen web manifest. No offline cache stores diary pages. Internet is required.
 
-Interactive to-do/shopping lists are available in the Lists workspace; diary pages categorised as List remain text pages. Scheduled reminders, calendar export, automatic page ordering, notifications, and chat bots are not implemented. Vocabulary is an explicit user-maintained hint; no model is trained or fine-tuned on handwriting.
+Interactive to-do/shopping lists are available in the Lists workspace; diary pages categorised as List remain text pages. Calendar event-file export is available through list items. App-scheduled reminders, automatic page ordering, push notifications, phone alarms, and chat bots are not implemented. Vocabulary is an explicit user-maintained hint; no model is trained or fine-tuned on handwriting.
 
 ## Develop and verify
 
