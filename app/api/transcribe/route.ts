@@ -45,7 +45,7 @@ Return ONLY the transcribed text. Do not add commentary, greetings, notes, or ma
 `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.5-flash-lite",
       contents: [
         {
           role: "user",
