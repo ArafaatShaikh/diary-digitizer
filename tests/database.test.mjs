@@ -446,3 +446,232 @@ test("optional covers stay private and cannot reference another owner or diary",
     await db.close();
   }
 });
+
+test("interactive lists isolate accounts, support completion, and cascade only their own items", async () => {
+  const db = await fixture();
+  try {
+    await db.exec(migration);
+    await db.exec(
+      await readFile(
+        new URL(
+          "../supabase/migrations/202610200002_diaries.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    await asUser(db, ids[0]);
+    await db.query(
+      "insert into public.diaries(user_id, title) values ($1, 'Keep this diary')",
+      [ids[0]],
+    );
+    await db.query(
+      "insert into public.entries(user_id, image_url, corrected_transcription) values ($1, '', 'Keep this page')",
+      [ids[0]],
+    );
+    await db.exec("reset role");
+    const listsMigration = await readFile(
+      new URL(
+        "../supabase/migrations/202610200004_interactive_lists.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await db.exec(listsMigration);
+    await db.exec(listsMigration);
+    await asUser(db, ids[0]);
+    const shopping = (
+      await db.query(
+        "insert into public.task_lists(user_id, title, kind) values ($1, 'Groceries', 'shopping') returning id",
+        [ids[0]],
+      )
+    ).rows[0].id;
+    const todo = (
+      await db.query(
+        "insert into public.task_lists(user_id, title) values ($1, 'Errands') returning id",
+        [ids[0]],
+      )
+    ).rows[0].id;
+    const item = (
+      await db.query(
+        "insert into public.task_items(user_id, list_id, text) values ($1, $2, 'Milk, 2 litres') returning id",
+        [ids[0], shopping],
+      )
+    ).rows[0].id;
+    await db.query(
+      "insert into public.task_items(user_id, list_id, text) values ($1, $2, 'Call dentist')",
+      [ids[0], todo],
+    );
+    await db.query(
+      "update public.task_items set completed = true, text = $1 where id = $2",
+      ["Milk, 1 litre", item],
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select completed from public.task_items where id = $1",
+          [item],
+        )
+      ).rows[0].completed,
+      true,
+    );
+    await asUser(db, ids[1]);
+    assert.equal(
+      (await db.query("select * from public.task_lists")).rows.length,
+      0,
+    );
+    assert.equal(
+      (await db.query("select * from public.task_items")).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "update public.task_items set completed = false where id = $1 returning id",
+          [item],
+        )
+      ).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "delete from public.task_lists where id = $1 returning id",
+          [shopping],
+        )
+      ).rows.length,
+      0,
+    );
+    await assert.rejects(
+      db.query(
+        "insert into public.task_items(user_id, list_id, text) values ($1, $2, 'Cross-owner item')",
+        [ids[1], shopping],
+      ),
+      /foreign key/,
+    );
+    await assert.rejects(
+      db.query(
+        "insert into public.task_lists(user_id, title) values ($1, 'Spoof')",
+        [ids[0]],
+      ),
+      /row-level security/,
+    );
+    const other = (
+      await db.query(
+        "insert into public.task_lists(user_id, title) values ($1, 'Other user') returning id",
+        [ids[1]],
+      )
+    ).rows[0].id;
+    await asUser(db, ids[0]);
+    await assert.rejects(
+      db.query("update public.task_items set list_id = $1 where id = $2", [
+        other,
+        item,
+      ]),
+      /foreign key/,
+    );
+    await db.query("delete from public.task_lists where id = $1", [shopping]);
+    assert.equal(
+      (
+        await db.query("select * from public.task_items where list_id = $1", [
+          shopping,
+        ])
+      ).rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query("select * from public.task_items where list_id = $1", [
+          todo,
+        ])
+      ).rows.length,
+      1,
+    );
+    assert.equal(
+      (await db.query("select title from public.diaries")).rows[0].title,
+      "Keep this diary",
+    );
+    assert.equal(
+      (await db.query("select corrected_transcription from public.entries"))
+        .rows[0].corrected_transcription,
+      "Keep this page",
+    );
+    await db.exec("reset role; set role anon");
+    await assert.rejects(
+      db.exec("select * from public.task_lists"),
+      /permission denied/,
+    );
+    await assert.rejects(
+      db.exec("select * from public.task_items"),
+      /permission denied/,
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test("reviewed imports are atomic and stable IDs allow retries without duplicates", async () => {
+  const db = await fixture();
+  try {
+    await db.exec(
+      await readFile(
+        new URL(
+          "../supabase/migrations/202610200004_interactive_lists.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    await asUser(db, ids[0]);
+    const list = (
+      await db.query(
+        "insert into public.task_lists(user_id, title) values ($1, 'Import') returning id",
+        [ids[0]],
+      )
+    ).rows[0].id;
+    const sql = `insert into public.task_items(id, user_id, list_id, text, position) values ($1, $3, $4, $5, 0), ($2, $3, $4, $6, 1)
+      on conflict (id) do update set text = excluded.text, position = excluded.position`;
+    await assert.rejects(
+      db.query(sql, [ids[2], ids[3], ids[0], list, "Valid item", "  "]),
+      /check constraint/,
+    );
+    assert.equal(
+      (await db.query("select * from public.task_items")).rows.length,
+      0,
+    );
+    await db.query(sql, [ids[2], ids[3], ids[0], list, "Milk", "Bread"]);
+    await db.query(sql, [
+      ids[2],
+      ids[3],
+      ids[0],
+      list,
+      "Milk, 2 litres",
+      "Bread",
+    ]);
+    assert.equal(
+      (await db.query("select * from public.task_items")).rows.length,
+      2,
+    );
+    assert.equal(
+      (
+        await db.query("select text from public.task_items where id = $1", [
+          ids[2],
+        ])
+      ).rows[0].text,
+      "Milk, 2 litres",
+    );
+    await asUser(db, ids[1]);
+    const otherList = (
+      await db.query(
+        "insert into public.task_lists(user_id, title) values ($1, 'Other') returning id",
+        [ids[1]],
+      )
+    ).rows[0].id;
+    await assert.rejects(
+      db.query(sql, [ids[2], ids[3], ids[1], otherList, "Steal", "Steal"]),
+      /row-level security/,
+    );
+  } finally {
+    await db.close();
+  }
+});

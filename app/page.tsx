@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
+import Lists from "./components/lists";
 import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
 
 type Kind = "journal" | "note" | "letter" | "list";
@@ -22,7 +23,7 @@ const kinds: { value: Kind; label: string }[] = [
   { value: "journal", label: "Journal" },
   { value: "note", label: "Notes" },
   { value: "letter", label: "Letter" },
-  { value: "list", label: "List" },
+  { value: "list", label: "List (text page)" },
 ];
 type Entry = {
   diary_id: string | null;
@@ -321,6 +322,10 @@ function DiaryCover({ diary }: { diary: Diary }) {
 }
 
 function Workspace({ session }: { session: Session }) {
+  const [area, setArea] = useState<"diaries" | "lists">("diaries");
+  const [listDirty, setListDirty] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
+  const [accountStatus, setAccountStatus] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [diaries, setDiaries] = useState<Diary[]>([]);
   // null = diary shelf; "loose" = pages not assigned to a diary.
@@ -818,623 +823,693 @@ function Workspace({ session }: { session: Session }) {
           <BookOpen size={26} /> Paper, kept close
         </div>
         <div className="header-actions">
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => setPreferences((p) => !p)}
-          >
-            Vocabulary
-          </button>
+          {area === "diaries" && (
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setPreferences((p) => !p)}
+            >
+              Vocabulary
+            </button>
+          )}
           <button
             className="icon-button secondary"
             aria-label="Sign out"
-            disabled={busy}
+            disabled={busy || listBusy}
             onClick={async () => {
-              if (editor && !confirm("Discard your draft and sign out?"))
+              if (
+                (editor || listDirty) &&
+                !confirm("Discard your draft and sign out?")
+              )
                 return;
               const { error } = await supabase.auth.signOut();
-              if (error) setStatus(error.message);
+              if (error) setAccountStatus(error.message);
             }}
           >
             <LogOut size={19} />
           </button>
         </div>
       </header>
-      <div
-        className={`intro ${currentDiary?.cover_path ? "intro-with-cover" : ""}`}
-      >
-        {currentDiary?.cover_path && (
-          <DiaryCover
-            key={`${currentDiary.id}:${currentDiary.cover_path}`}
-            diary={currentDiary}
-          />
-        )}
-        <p className="eyebrow">
-          {activeDiaryId === null
-            ? "Your private collection"
-            : "Your handwritten pages"}
-        </p>
-        <h1>
-          {currentDiary?.title ||
-            (activeDiaryId === "loose"
-              ? "Loose pages"
-              : "Your diaries, together.")}
-        </h1>
-        <p>
-          {currentDiary?.description ||
-            (activeDiaryId === "loose"
-              ? "Pages waiting for a diary. Open a page to file it."
-              : "A diary for every notebook, year, or part of your life.")}
-        </p>
-        <p className="small">Signed in as {session.user.email}</p>
-      </div>
-      {status && (
+      {accountStatus && (
         <p className="notice" role="status">
-          {status}
+          {accountStatus}
         </p>
       )}
-      {preferences && (
-        <section className="panel stack">
-          <h2>Names and words you often write</h2>
-          <p>
-            Add one word or name per line, up to 50. These hints belong to your
-            account and are sent to Gemini with your scans.
-          </p>
-          <label>
-            Personal vocabulary
-            <textarea
-              rows={5}
-              value={vocabulary}
-              onChange={(e) => setVocabulary(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <button disabled={busy} onClick={saveVocabulary}>
-            Save vocabulary
-          </button>
-        </section>
-      )}
-      {!editor && activeDiaryId !== null && (
-        <div className="row spread diary-navigation">
+      <nav className="workspace-tabs" aria-label="Your collection">
+        {(
+          [
+            ["diaries", "Diaries"],
+            ["lists", "Lists"],
+          ] as const
+        ).map(([value, label]) => (
           <button
-            className="text-button"
-            disabled={busy}
-            onClick={() => enterDiary(null)}
+            key={value}
+            className={area === value ? "secondary view-active" : "secondary"}
+            aria-pressed={area === value}
+            disabled={busy || listBusy}
+            onClick={() => {
+              if (area === value) return;
+              if (
+                (editor ||
+                  listDirty ||
+                  (diaryForm && (diaryTitle.trim() || coverPhoto))) &&
+                !confirm("Discard your unsaved changes and switch sections?")
+              )
+                return;
+              setEditor(false);
+              setDiaryForm(false);
+              setPhoto("");
+              setText("");
+              setCoverPhoto("");
+              setListDirty(false);
+              setListBusy(false);
+              setArea(value);
+            }}
           >
-            <ArrowLeft size={16} /> All diaries
+            {label}
           </button>
-          {currentDiary && (
-            <div className="row">
+        ))}
+      </nav>
+      {area === "lists" ? (
+        <Lists
+          session={session}
+          onDirtyChange={setListDirty}
+          onBusyChange={setListBusy}
+        />
+      ) : (
+        <>
+          <div
+            className={`intro ${currentDiary?.cover_path ? "intro-with-cover" : ""}`}
+          >
+            {currentDiary?.cover_path && (
+              <DiaryCover
+                key={`${currentDiary.id}:${currentDiary.cover_path}`}
+                diary={currentDiary}
+              />
+            )}
+            <p className="eyebrow">
+              {activeDiaryId === null
+                ? "Your private collection"
+                : "Your handwritten pages"}
+            </p>
+            <h1>
+              {currentDiary?.title ||
+                (activeDiaryId === "loose"
+                  ? "Loose pages"
+                  : "Your diaries, together.")}
+            </h1>
+            <p>
+              {currentDiary?.description ||
+                (activeDiaryId === "loose"
+                  ? "Pages waiting for a diary. Open a page to file it."
+                  : "A diary for every notebook, year, or part of your life.")}
+            </p>
+            <p className="small">Signed in as {session.user.email}</p>
+          </div>
+          {status && (
+            <p className="notice" role="status">
+              {status}
+            </p>
+          )}
+          {preferences && (
+            <section className="panel stack">
+              <h2>Names and words you often write</h2>
+              <p>
+                Add one word or name per line, up to 50. These hints belong to
+                your account and are sent to Gemini with your scans.
+              </p>
+              <label>
+                Personal vocabulary
+                <textarea
+                  rows={5}
+                  value={vocabulary}
+                  onChange={(e) => setVocabulary(e.target.value)}
+                  disabled={busy}
+                />
+              </label>
+              <button disabled={busy} onClick={saveVocabulary}>
+                Save vocabulary
+              </button>
+            </section>
+          )}
+          {!editor && activeDiaryId !== null && (
+            <div className="row spread diary-navigation">
               <button
                 className="text-button"
                 disabled={busy}
-                onClick={() => newDiary(currentDiary)}
+                onClick={() => enterDiary(null)}
               >
-                Edit diary
+                <ArrowLeft size={16} /> All diaries
               </button>
-              {loaded && !scopedPages.length && (
-                <button
-                  className="text-button danger"
-                  disabled={busy}
-                  onClick={() => deleteEmptyDiary(currentDiary)}
-                >
-                  Delete empty diary
-                </button>
+              {currentDiary && (
+                <div className="row">
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => newDiary(currentDiary)}
+                  >
+                    Edit diary
+                  </button>
+                  {loaded && !scopedPages.length && (
+                    <button
+                      className="text-button danger"
+                      disabled={busy}
+                      onClick={() => deleteEmptyDiary(currentDiary)}
+                    >
+                      Delete empty diary
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
-        </div>
-      )}
-      {diaryForm && !editor && (
-        <form className="panel stack" onSubmit={saveDiary}>
-          <h2>{editingDiary ? "Edit diary" : "Create a diary"}</h2>
-          <label>
-            Diary name
-            <input
-              required
-              maxLength={160}
-              value={diaryTitle}
-              onChange={(e) => setDiaryTitle(e.target.value)}
-              disabled={busy}
-              placeholder="My 2026 diary"
-            />
-          </label>
-          <label>
-            Description (optional)
-            <textarea
-              maxLength={500}
-              rows={2}
-              value={diaryDescription}
-              onChange={(e) => setDiaryDescription(e.target.value)}
-              disabled={busy}
-              placeholder="What belongs in this diary?"
-            />
-          </label>
-          <div className="cover-editor stack">
-            <p>Cover image (optional)</p>
-            {coverPhoto ? (
-              <img
-                className="diary-cover cover-preview"
-                src={coverPhoto}
-                alt="Selected diary cover"
-              />
-            ) : editingDiary?.cover_path && !removeCover ? (
-              <DiaryCover key={editingDiary.cover_path} diary={editingDiary} />
-            ) : (
-              <div className="diary-cover-placeholder">
-                <BookOpen size={36} />
-              </div>
-            )}
-            <label className="upload-button">
-              <Camera size={18} />{" "}
-              {coverPhoto || (editingDiary?.cover_path && !removeCover)
-                ? "Replace cover"
-                : "Choose a cover photo"}
-              <input
-                type="file"
-                accept="image/*"
-                disabled={busy}
-                onChange={(e) => {
-                  void chooseCover(e.target.files?.[0]);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {(coverPhoto || (editingDiary?.cover_path && !removeCover)) && (
-              <button
-                type="button"
-                className="text-button danger"
-                disabled={busy}
-                onClick={() => {
-                  setCoverPhoto("");
-                  setRemoveCover(true);
-                }}
-              >
-                Remove cover
-              </button>
-            )}
-            <p className="small">
-              Covers are private to your account. They are resized before upload
-              and are not sent to Gemini.
-            </p>
-          </div>
-          <div className="row">
-            <button disabled={busy || !diaryTitle.trim()}>
-              {busy ? "Saving…" : editingDiary ? "Save diary" : "Create diary"}
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => setDiaryForm(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-      {editor ? (
-        <section className="panel">
-          <div className="row spread">
-            <button
-              className="text-button"
-              disabled={busy}
-              onClick={() => {
-                if (confirm("Discard changes and return to your archive?")) {
-                  setEditor(false);
-                  setPhoto("");
-                  setSelected(null);
-                  setText("");
-                }
-              }}
-            >
-              <ArrowLeft size={16} /> Back to archive
-            </button>
-            {selected && (
-              <button
-                className="danger text-button"
-                disabled={busy}
-                onClick={() => remove(selected)}
-              >
-                <Trash2 size={16} /> Delete page
-              </button>
-            )}
-          </div>
-          <div className="editor-grid">
-            <div className="stack">
-              <h2>{selected ? "Original page" : "Start with a photo"}</h2>
-              {photo ? (
-                <img
-                  src={photo}
-                  className="page-photo"
-                  alt="Photo ready to transcribe"
+          {diaryForm && !editor && (
+            <form className="panel stack" onSubmit={saveDiary}>
+              <h2>{editingDiary ? "Edit diary" : "Create a diary"}</h2>
+              <label>
+                Diary name
+                <input
+                  required
+                  maxLength={160}
+                  value={diaryTitle}
+                  onChange={(e) => setDiaryTitle(e.target.value)}
+                  disabled={busy}
+                  placeholder="My 2026 diary"
                 />
-              ) : selected ? (
-                <PagePhoto key={selected.id} entry={selected} />
-              ) : (
-                <div className="photo-placeholder">
-                  <Camera size={40} />
-                  <p>Photograph the whole page in good light.</p>
+              </label>
+              <label>
+                Description (optional)
+                <textarea
+                  maxLength={500}
+                  rows={2}
+                  value={diaryDescription}
+                  onChange={(e) => setDiaryDescription(e.target.value)}
+                  disabled={busy}
+                  placeholder="What belongs in this diary?"
+                />
+              </label>
+              <div className="cover-editor stack">
+                <p>Cover image (optional)</p>
+                {coverPhoto ? (
+                  <img
+                    className="diary-cover cover-preview"
+                    src={coverPhoto}
+                    alt="Selected diary cover"
+                  />
+                ) : editingDiary?.cover_path && !removeCover ? (
+                  <DiaryCover
+                    key={editingDiary.cover_path}
+                    diary={editingDiary}
+                  />
+                ) : (
+                  <div className="diary-cover-placeholder">
+                    <BookOpen size={36} />
+                  </div>
+                )}
+                <label className="upload-button">
+                  <Camera size={18} />{" "}
+                  {coverPhoto || (editingDiary?.cover_path && !removeCover)
+                    ? "Replace cover"
+                    : "Choose a cover photo"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={busy}
+                    onChange={(e) => {
+                      void chooseCover(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {(coverPhoto || (editingDiary?.cover_path && !removeCover)) && (
+                  <button
+                    type="button"
+                    className="text-button danger"
+                    disabled={busy}
+                    onClick={() => {
+                      setCoverPhoto("");
+                      setRemoveCover(true);
+                    }}
+                  >
+                    Remove cover
+                  </button>
+                )}
+                <p className="small">
+                  Covers are private to your account. They are resized before
+                  upload and are not sent to Gemini.
+                </p>
+              </div>
+              <div className="row">
+                <button disabled={busy || !diaryTitle.trim()}>
+                  {busy
+                    ? "Saving…"
+                    : editingDiary
+                      ? "Save diary"
+                      : "Create diary"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setDiaryForm(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          {editor ? (
+            <section className="panel">
+              <div className="row spread">
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      confirm("Discard changes and return to your archive?")
+                    ) {
+                      setEditor(false);
+                      setPhoto("");
+                      setSelected(null);
+                      setText("");
+                    }
+                  }}
+                >
+                  <ArrowLeft size={16} /> Back to archive
+                </button>
+                {selected && (
+                  <button
+                    className="danger text-button"
+                    disabled={busy}
+                    onClick={() => remove(selected)}
+                  >
+                    <Trash2 size={16} /> Delete page
+                  </button>
+                )}
+              </div>
+              <div className="editor-grid">
+                <div className="stack">
+                  <h2>{selected ? "Original page" : "Start with a photo"}</h2>
+                  {photo ? (
+                    <img
+                      src={photo}
+                      className="page-photo"
+                      alt="Photo ready to transcribe"
+                    />
+                  ) : selected ? (
+                    <PagePhoto key={selected.id} entry={selected} />
+                  ) : (
+                    <div className="photo-placeholder">
+                      <Camera size={40} />
+                      <p>Photograph the whole page in good light.</p>
+                    </div>
+                  )}
+                  {!selected && (
+                    <>
+                      <label className="upload-button">
+                        <Camera size={18} />{" "}
+                        {photo
+                          ? "Choose a different photo"
+                          : "Take or choose a photo"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={busy}
+                          onChange={(e) => {
+                            void scan(e.target.files?.[0]);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      <p className="small">
+                        Your photo is resized before upload. Scanning sends it
+                        to Google Gemini. Check that you are comfortable sharing
+                        its contents.
+                      </p>
+                    </>
+                  )}
+                  {photo && (
+                    <button disabled={busy} onClick={transcribe}>
+                      {busy
+                        ? "Please wait…"
+                        : text
+                          ? "Read photo again"
+                          : "Read handwriting"}
+                    </button>
+                  )}
                 </div>
-              )}
-              {!selected && (
-                <>
-                  <label className="upload-button">
-                    <Camera size={18} />{" "}
-                    {photo
-                      ? "Choose a different photo"
-                      : "Take or choose a photo"}
+                <form
+                  className="stack"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void save();
+                  }}
+                >
+                  <h2>{selected ? "Edit your page" : "Review and save"}</h2>
+                  <label>
+                    Title
                     <input
-                      type="file"
-                      accept="image/*"
+                      maxLength={160}
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      disabled={busy}
+                      placeholder="Give this page a name"
+                    />
+                  </label>
+                  <label>
+                    Diary
+                    <select
+                      value={diaryId}
                       disabled={busy}
                       onChange={(e) => {
-                        void scan(e.target.files?.[0]);
-                        e.target.value = "";
+                        setDiaryId(e.target.value);
+                        setPage(
+                          nextPageNumber(
+                            entries.filter((item) => item.id !== selected?.id),
+                            e.target.value || null,
+                          ),
+                        );
                       }}
+                    >
+                      <option value="">Loose pages (no diary)</option>
+                      {diaries.map((diary) => (
+                        <option key={diary.id} value={diary.id}>
+                          {diary.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="field-grid">
+                    <label>
+                      Save as
+                      <select
+                        value={kind}
+                        onChange={(e) => setKind(e.target.value as Kind)}
+                        disabled={busy}
+                      >
+                        {kinds.map((k) => (
+                          <option key={k.value} value={k.value}>
+                            {k.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Written on
+                      <input
+                        type="date"
+                        required
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        disabled={busy}
+                      />
+                    </label>
+                    <label>
+                      Page number
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000000}
+                        required
+                        value={page}
+                        onChange={(e) => setPage(Number(e.target.value))}
+                        disabled={busy}
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Page text
+                    <textarea
+                      className="transcription"
+                      required
+                      rows={14}
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      disabled={busy}
+                      placeholder="Your transcription appears here. You can also type a page yourself."
                     />
                   </label>
                   <p className="small">
-                    Your photo is resized before upload. Scanning sends it to
-                    Google Gemini. Check that you are comfortable sharing its
-                    contents.
+                    Your wording stays yours. Check unclear words, spelling, and
+                    numbers before saving.
                   </p>
+                  <button disabled={busy || !text.trim()}>
+                    {busy ? "Please wait…" : "Save to my archive"}
+                  </button>
+                </form>
+              </div>
+            </section>
+          ) : activeDiaryId === null ? (
+            <section aria-label="Your diaries">
+              <div className="row spread shelf-heading">
+                <p className="small">
+                  {loaded
+                    ? `${diaries.length} ${diaries.length === 1 ? "diary" : "diaries"}`
+                    : "Loading your collection…"}
+                </p>
+                <button disabled={busy || !loaded} onClick={() => newDiary()}>
+                  <Plus size={18} /> New diary
+                </button>
+              </div>
+              {!loaded ? (
+                <button
+                  className="secondary"
+                  onClick={() => setRevision((r) => r + 1)}
+                >
+                  Reload collection
+                </button>
+              ) : (
+                <>
+                  {!diaries.length && (
+                    <div className="empty">
+                      <BookOpen size={42} />
+                      <h2>Create your first diary.</h2>
+                      <p>
+                        Keep all the pages of a notebook together. You can
+                        create as many diaries as you need.
+                      </p>
+                      <button disabled={busy} onClick={() => newDiary()}>
+                        <Plus size={18} /> Create a diary
+                      </button>
+                    </div>
+                  )}
+                  <div className="cards diary-shelf">
+                    {diaries.map((diary) => {
+                      const pages = pagesInDiary(entries, diary.id);
+                      return (
+                        <button
+                          className="entry-card diary-card"
+                          key={diary.id}
+                          disabled={busy}
+                          onClick={() => enterDiary(diary.id)}
+                        >
+                          <DiaryCover
+                            key={`${diary.id}:${diary.cover_path || "none"}`}
+                            diary={diary}
+                          />
+                          <h2>{diary.title}</h2>
+                          <p>
+                            {diary.description ||
+                              "Your handwritten pages, kept together."}
+                          </p>
+                          <span className="small">
+                            {pages.length}{" "}
+                            {pages.length === 1 ? "page" : "pages"} · Open diary
+                            →
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    className="loose-pages secondary"
+                    disabled={busy}
+                    onClick={() => enterDiary("loose")}
+                  >
+                    <span>Loose pages</span>
+                    <span>
+                      {loosePages.length}{" "}
+                      {loosePages.length === 1 ? "page" : "pages"} · Open →
+                    </span>
+                  </button>
                 </>
               )}
-              {photo && (
-                <button disabled={busy} onClick={transcribe}>
-                  {busy
-                    ? "Please wait…"
-                    : text
-                      ? "Read photo again"
-                      : "Read handwriting"}
-                </button>
-              )}
-            </div>
-            <form
-              className="stack"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void save();
-              }}
-            >
-              <h2>{selected ? "Edit your page" : "Review and save"}</h2>
-              <label>
-                Title
-                <input
-                  maxLength={160}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  disabled={busy}
-                  placeholder="Give this page a name"
-                />
-              </label>
-              <label>
-                Diary
+            </section>
+          ) : (
+            <>
+              <div className="toolbar">
+                <label className="search">
+                  <Search size={18} />
+                  <input
+                    aria-label="Search this diary"
+                    placeholder="Search titles, words, or dates"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </label>
                 <select
-                  value={diaryId}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setDiaryId(e.target.value);
-                    setPage(
-                      nextPageNumber(
-                        entries.filter((item) => item.id !== selected?.id),
-                        e.target.value || null,
-                      ),
-                    );
-                  }}
+                  aria-label="Filter by type"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
                 >
-                  <option value="">Loose pages (no diary)</option>
-                  {diaries.map((diary) => (
-                    <option key={diary.id} value={diary.id}>
-                      {diary.title}
+                  <option value="all">All pages</option>
+                  {kinds.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
                     </option>
                   ))}
                 </select>
-              </label>
-              <div className="field-grid">
-                <label>
-                  Save as
-                  <select
-                    value={kind}
-                    onChange={(e) => setKind(e.target.value as Kind)}
-                    disabled={busy}
-                  >
-                    {kinds.map((k) => (
-                      <option key={k.value} value={k.value}>
-                        {k.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Written on
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    disabled={busy}
-                  />
-                </label>
-                <label>
-                  Page number
-                  <input
-                    type="number"
-                    min={1}
-                    max={1000000}
-                    required
-                    value={page}
-                    onChange={(e) => setPage(Number(e.target.value))}
-                    disabled={busy}
-                  />
-                </label>
+                <button onClick={() => open(null)} disabled={busy || !loaded}>
+                  <Plus size={18} /> Add a page
+                </button>
               </div>
-              <label>
-                Page text
-                <textarea
-                  className="transcription"
-                  required
-                  rows={14}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  disabled={busy}
-                  placeholder="Your transcription appears here. You can also type a page yourself."
-                />
-              </label>
-              <p className="small">
-                Your wording stays yours. Check unclear words, spelling, and
-                numbers before saving.
-              </p>
-              <button disabled={busy || !text.trim()}>
-                {busy ? "Please wait…" : "Save to my archive"}
-              </button>
-            </form>
-          </div>
-        </section>
-      ) : activeDiaryId === null ? (
-        <section aria-label="Your diaries">
-          <div className="row spread shelf-heading">
-            <p className="small">
-              {loaded
-                ? `${diaries.length} ${diaries.length === 1 ? "diary" : "diaries"}`
-                : "Loading your collection…"}
-            </p>
-            <button disabled={busy || !loaded} onClick={() => newDiary()}>
-              <Plus size={18} /> New diary
-            </button>
-          </div>
-          {!loaded ? (
-            <button
-              className="secondary"
-              onClick={() => setRevision((r) => r + 1)}
-            >
-              Reload collection
-            </button>
-          ) : (
-            <>
-              {!diaries.length && (
-                <div className="empty">
-                  <BookOpen size={42} />
-                  <h2>Create your first diary.</h2>
-                  <p>
-                    Keep all the pages of a notebook together. You can create as
-                    many diaries as you need.
-                  </p>
-                  <button disabled={busy} onClick={() => newDiary()}>
-                    <Plus size={18} /> Create a diary
+              <div className="row spread">
+                <p className="small">
+                  {loaded
+                    ? `${scopedPages.length} saved ${scopedPages.length === 1 ? "page" : "pages"}`
+                    : "Loading your pages…"}
+                </p>
+                <div className="row">
+                  <div className="view-controls" aria-label="Diary view">
+                    {(
+                      [
+                        ["pages", "Pages"],
+                        ["index", "Index"],
+                        ["book", "Read as book"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={
+                          view === value ? "view-active secondary" : "secondary"
+                        }
+                        aria-pressed={view === value}
+                        disabled={!loaded || !scopedPages.length}
+                        onClick={() => {
+                          setView(value);
+                          setJumpPage(null);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="text-button"
+                    onClick={download}
+                    disabled={!loaded || !scopedPages.length}
+                  >
+                    <Download size={16} /> Export{" "}
+                    {currentDiary ? "diary" : "loose pages"}
                   </button>
                 </div>
-              )}
-              <div className="cards diary-shelf">
-                {diaries.map((diary) => {
-                  const pages = pagesInDiary(entries, diary.id);
-                  return (
-                    <button
-                      className="entry-card diary-card"
-                      key={diary.id}
-                      disabled={busy}
-                      onClick={() => enterDiary(diary.id)}
-                    >
-                      <DiaryCover
-                        key={`${diary.id}:${diary.cover_path || "none"}`}
-                        diary={diary}
-                      />
-                      <h2>{diary.title}</h2>
-                      <p>
-                        {diary.description ||
-                          "Your handwritten pages, kept together."}
-                      </p>
-                      <span className="small">
-                        {pages.length} {pages.length === 1 ? "page" : "pages"} ·
-                        Open diary →
-                      </span>
-                    </button>
-                  );
-                })}
               </div>
-              <button
-                className="loose-pages secondary"
-                disabled={busy}
-                onClick={() => enterDiary("loose")}
-              >
-                <span>Loose pages</span>
-                <span>
-                  {loosePages.length}{" "}
-                  {loosePages.length === 1 ? "page" : "pages"} · Open →
-                </span>
-              </button>
-            </>
-          )}
-        </section>
-      ) : (
-        <>
-          <div className="toolbar">
-            <label className="search">
-              <Search size={18} />
-              <input
-                aria-label="Search this diary"
-                placeholder="Search titles, words, or dates"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-            <select
-              aria-label="Filter by type"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            >
-              <option value="all">All pages</option>
-              {kinds.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => open(null)} disabled={busy || !loaded}>
-              <Plus size={18} /> Add a page
-            </button>
-          </div>
-          <div className="row spread">
-            <p className="small">
-              {loaded
-                ? `${scopedPages.length} saved ${scopedPages.length === 1 ? "page" : "pages"}`
-                : "Loading your pages…"}
-            </p>
-            <div className="row">
-              <div className="view-controls" aria-label="Diary view">
-                {(
-                  [
-                    ["pages", "Pages"],
-                    ["index", "Index"],
-                    ["book", "Read as book"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={
-                      view === value ? "view-active secondary" : "secondary"
-                    }
-                    aria-pressed={view === value}
-                    disabled={!loaded || !scopedPages.length}
-                    onClick={() => {
-                      setView(value);
-                      setJumpPage(null);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <button
-                className="text-button"
-                onClick={download}
-                disabled={!loaded || !scopedPages.length}
-              >
-                <Download size={16} /> Export{" "}
-                {currentDiary ? "diary" : "loose pages"}
-              </button>
-            </div>
-          </div>
-          {!loaded ? (
-            <button
-              className="secondary"
-              onClick={() => setRevision((r) => r + 1)}
-            >
-              Reload pages
-            </button>
-          ) : !visible.length ? (
-            <section className="empty">
-              <BookOpen size={42} />
-              <h2>
-                {scopedPages.length
-                  ? "No matching pages"
-                  : "Your first page starts here."}
-              </h2>
-              <p>
-                {scopedPages.length
-                  ? "Try a different search or type."
-                  : "Take a photo of your notebook, review the words, and save."}
-              </p>
-              {!scopedPages.length && (
-                <button onClick={() => open(null)}>
-                  <Camera size={18} /> Add your first page
-                </button>
-              )}
-            </section>
-          ) : view === "index" ? (
-            <section className="diary-index panel" aria-label="Diary index">
-              <h2>Contents</h2>
-              <p className="small">
-                Updated from your page titles and numbers. Select a page to read
-                it.
-              </p>
-              <ol>
-                {visible.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      className="index-row"
-                      onClick={() => {
-                        setView("book");
-                        setJumpPage(entry.id);
-                      }}
-                    >
-                      <span className="index-number">
-                        Page {entry.page_number || "—"}
-                      </span>
-                      <span className="index-title">
-                        {entry.title || "Untitled page"}
-                      </span>
-                      <time dateTime={entry.entry_date}>
-                        {entry.entry_date}
-                      </time>
-                      <span aria-hidden="true">→</span>
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          ) : view === "book" ? (
-            <section className="book-reader" aria-label="Read diary">
-              {visible.map((entry) => (
-                <article
-                  key={entry.id}
-                  id={`page-${entry.id}`}
-                  tabIndex={-1}
-                  className="book-page"
-                >
-                  <p className="eyebrow">
-                    Page {entry.page_number || "—"} · {entry.entry_date}
-                  </p>
-                  <h2>{entry.title || "Untitled page"}</h2>
-                  <p className="book-text">{entry.corrected_transcription}</p>
-                  <button className="text-button" onClick={() => open(entry)}>
-                    Edit page {entry.page_number || ""} →
-                  </button>
-                </article>
-              ))}
-            </section>
-          ) : (
-            <div className="cards">
-              {visible.map((entry) => (
+              {!loaded ? (
                 <button
-                  className="entry-card"
-                  key={entry.id}
-                  onClick={() => open(entry)}
+                  className="secondary"
+                  onClick={() => setRevision((r) => r + 1)}
                 >
-                  <span className="eyebrow">
-                    {kinds.find((k) => k.value === entry.kind)?.label ||
-                      "Journal"}{" "}
-                    · {entry.entry_date}
-                  </span>
-                  <h2>{entry.title || "Untitled page"}</h2>
-                  <p>{entry.corrected_transcription}</p>
-                  <span className="small">
-                    Page {entry.page_number || "—"} · Open page →
-                  </span>
+                  Reload pages
                 </button>
-              ))}
-            </div>
+              ) : !visible.length ? (
+                <section className="empty">
+                  <BookOpen size={42} />
+                  <h2>
+                    {scopedPages.length
+                      ? "No matching pages"
+                      : "Your first page starts here."}
+                  </h2>
+                  <p>
+                    {scopedPages.length
+                      ? "Try a different search or type."
+                      : "Take a photo of your notebook, review the words, and save."}
+                  </p>
+                  {!scopedPages.length && (
+                    <button onClick={() => open(null)}>
+                      <Camera size={18} /> Add your first page
+                    </button>
+                  )}
+                </section>
+              ) : view === "index" ? (
+                <section className="diary-index panel" aria-label="Diary index">
+                  <h2>Contents</h2>
+                  <p className="small">
+                    Updated from your page titles and numbers. Select a page to
+                    read it.
+                  </p>
+                  <ol>
+                    {visible.map((entry) => (
+                      <li key={entry.id}>
+                        <button
+                          className="index-row"
+                          onClick={() => {
+                            setView("book");
+                            setJumpPage(entry.id);
+                          }}
+                        >
+                          <span className="index-number">
+                            Page {entry.page_number || "—"}
+                          </span>
+                          <span className="index-title">
+                            {entry.title || "Untitled page"}
+                          </span>
+                          <time dateTime={entry.entry_date}>
+                            {entry.entry_date}
+                          </time>
+                          <span aria-hidden="true">→</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : view === "book" ? (
+                <section className="book-reader" aria-label="Read diary">
+                  {visible.map((entry) => (
+                    <article
+                      key={entry.id}
+                      id={`page-${entry.id}`}
+                      tabIndex={-1}
+                      className="book-page"
+                    >
+                      <p className="eyebrow">
+                        Page {entry.page_number || "—"} · {entry.entry_date}
+                      </p>
+                      <h2>{entry.title || "Untitled page"}</h2>
+                      <p className="book-text">
+                        {entry.corrected_transcription}
+                      </p>
+                      <button
+                        className="text-button"
+                        onClick={() => open(entry)}
+                      >
+                        Edit page {entry.page_number || ""} →
+                      </button>
+                    </article>
+                  ))}
+                </section>
+              ) : (
+                <div className="cards">
+                  {visible.map((entry) => (
+                    <button
+                      className="entry-card"
+                      key={entry.id}
+                      onClick={() => open(entry)}
+                    >
+                      <span className="eyebrow">
+                        {kinds.find((k) => k.value === entry.kind)?.label ||
+                          "Journal"}{" "}
+                        · {entry.entry_date}
+                      </span>
+                      <h2>{entry.title || "Untitled page"}</h2>
+                      <p>{entry.corrected_transcription}</p>
+                      <span className="small">
+                        Page {entry.page_number || "—"} · Open page →
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}

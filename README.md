@@ -2,6 +2,16 @@
 
 A mobile web app for photographing handwritten pages, reviewing Gemini transcriptions, and keeping private journals, notes, letters, and lists. Source stays in GitHub, Vercel serves the app, and Supabase handles accounts, database rows, and private photos. No laptop server is needed.
 
+## Interactive to-do and shopping lists
+
+Run only [`supabase/migrations/202610200004_interactive_lists.sql`](supabase/migrations/202610200004_interactive_lists.sql) in the existing Supabase project's SQL Editor before deploying this update. Do not reset/truncate anything. It adds owner-only `task_lists` and `task_items` tables, with a composite foreign key to prevent cross-account item assignment. Deleting a list deletes its own items, after an explicit confirmation in the UI. Existing diaries, photos, and old text pages with the List category are unchanged.
+
+Open **Lists → New list**, choose To-do or Shopping, and add individual items. Items can be edited, checked complete/incomplete, searched, hidden when complete, or deleted. Multiple lists belong to each account. The old diary-page List category is labelled **List (text page)** so it is distinct from the interactive Lists workspace.
+
+Inside a list, choose **Add from photo → Read list items**. Gemini proposes separate editable items and explicit checkbox states. Nothing is saved until **Add reviewed items to this list** is selected. Remove headings/unwanted items and correct quantities or unreadable words before saving. Dates/times remain literal item text; this update does not schedule calendar events, reminders, notifications, or alarms. Up to 100 proposed items are accepted from one scan. The app retains the photo only in the current browser draft, not in Supabase storage; Google receives it for processing.
+
+List scans and diary scans share the existing 10-per-user / 100-per-project UTC daily attempt limits. Typed items and completion changes do not call Gemini. The Gemini model/key settings are unchanged. Proposed items are validated as a complete response, and confirmed imports use a single atomic database statement with stable item IDs to avoid duplicate items on retry. Unsaved drafts are kept after errors and warn before leaving the workspace.
+
 ## Diary index and optional covers
 
 For an existing installation with the first two migrations applied, run only [`supabase/migrations/202610200003_diary_covers.sql`](supabase/migrations/202610200003_diary_covers.sql) before deploying the cover/index update. Do not reset or truncate any data. The migration adds a nullable cover reference and a private `diary-covers` storage bucket; existing diaries/pages are preserved. Review any unrelated broad storage policies, which combine with owner policies using OR.
@@ -60,7 +70,7 @@ Do not assign every old row to whoever signs up first. Move personal vocabulary 
 
 Included: individual accounts, password recovery, private photos and rows, original/corrected text, page numbering, titles/dates/types, archive search/filtering, per-user vocabulary, text export, deletion, mobile layout, and a Home Screen web manifest. No offline cache stores diary pages. Internet is required.
 
-Lists are currently editable text. Interactive checkboxes, scheduled reminders, automatic page ordering, notifications, and chat bots are not implemented. Vocabulary is an explicit user-maintained hint; no model is trained or fine-tuned on handwriting.
+Interactive to-do/shopping lists are available in the Lists workspace; diary pages categorised as List remain text pages. Scheduled reminders, calendar export, automatic page ordering, notifications, and chat bots are not implemented. Vocabulary is an explicit user-maintained hint; no model is trained or fine-tuned on handwriting.
 
 ## Develop and verify
 

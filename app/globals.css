@@ -551,3 +551,127 @@ footer {
     grid-row: 1;
   }
 }
+
+.workspace-tabs {
+  display: flex;
+  gap: 10px;
+  padding-top: 24px;
+}
+.workspace-tabs .view-active {
+  background: var(--accent);
+  color: white;
+}
+.list-card > svg {
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.add-item-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.add-item-form label {
+  flex: 1;
+}
+.add-item-form button {
+  flex-shrink: 0;
+}
+.list-filters {
+  margin: 24px 0 18px;
+}
+.list-search {
+  flex: 1;
+  min-width: 160px;
+  max-width: 450px;
+}
+.inline-check {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+}
+.inline-check input,
+.task-check input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.task-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: white;
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.task-row:last-child {
+  border-bottom: 0;
+}
+.task-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 40px;
+}
+.task-text {
+  flex: 1;
+  padding-top: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.task-complete .task-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.edit-item-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.review-item {
+  display: grid;
+  grid-template-columns: 30px 1fr 36px;
+  align-items: center;
+  gap: 12px;
+}
+.list-photo {
+  max-height: 420px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 520px) {
+  .add-item-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .task-row {
+    gap: 8px;
+    padding: 12px;
+  }
+  .review-item {
+    gap: 8px;
+  }
+}
