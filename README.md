@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Diary Digitizer — Paper, kept close
 
-## Getting Started
+A mobile web app for photographing handwritten pages, reviewing Gemini transcriptions, and keeping private journals, notes, letters, and lists. Source stays in GitHub, Vercel serves the app, and Supabase handles accounts, database rows, and private photos. No laptop server is needed.
 
-First, run the development server:
+## Roll out to the existing project
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Apply the database migration **before merging/deploying** this branch. The old shared passcode is removed; people must sign in with an individual Supabase account.
+
+1. Export/back up the existing `entries` and `profiles` tables and any existing photos. The free Supabase plan does not replace your own backups.
+2. In Supabase SQL Editor, run [`supabase/migrations/202610200001_private_accounts.sql`](supabase/migrations/202610200001_private_accounts.sql). It is transactional and repeatable. It adds missing columns, replaces all existing policies on `entries` and `profiles` with owner-only policies, creates the private `diary-pages` bucket, and adds atomic scan allowances. It does not delete or automatically reassign existing diary rows. Review existing policies on `storage.objects`: any broad policy must be narrowed so it cannot grant access to this bucket. Storage RLS policies combine with OR.
+3. In Supabase Authentication, enable email/password sign-in. Set Site URL to `https://diary-digitizer-hazel.vercel.app`. Add that URL and `https://diary-digitizer-hazel.vercel.app/reset-password` to allowed redirect URLs (and explicit preview URLs if needed). For a friends-only trial, invite/create users in the dashboard and disable new public signups. Supabase's default email sender is restricted; configure a suitable SMTP provider if confirmation/recovery emails cannot reach your friends, or create confirmed accounts manually in the dashboard. Never share one account between people.
+4. Keep the existing Vercel variables `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Optionally set `GEMINI_MODEL` to `gemini-3.5-flash-lite` (default) or `gemini-3.5-flash`. Confirm the exact model is available to your Google project. These model IDs were retained from the existing app/request; no live Gemini call was made during development. Remove `APP_PASSCODE` / `APP_PASSWORD` and rotate the former shared passcode anywhere it was reused. Never put a Gemini key or Supabase service-role key in `NEXT_PUBLIC_*` variables.
+5. Deploy the branch preview, test with two distinct accounts, then merge into `main` for Vercel production deployment. Verify that each user can scan/save/edit/delete their own page, cannot read the other user's records/photos through the Supabase API, and can sign out/recover a password. Keep the old deployment URL available only as needed during migration; earlier deployments contain the obsolete shared-passcode interface.
+
+## Preserve and assign old diary pages
+
+The migration adds `user_id` if missing, without assigning an owner. Existing owner IDs are retained. Rows with null/shared/unrecognised ownership stay hidden from ordinary accounts. An administrator must identify the actual owner before assigning individual rows. In SQL Editor, inspect metadata (not through the public app):
+
+```sql
+select id, user_id, created_at from public.entries order by created_at;
+select id, email from auth.users;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+After verifying ownership, substitute the correct UUIDs and update **only the reviewed entry IDs**:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```sql
+update public.entries
+set user_id = 'VERIFIED_AUTH_USER_UUID'
+where id in ('REVIEWED_ENTRY_UUID');
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Do not assign every old row to whoever signs up first. Move personal vocabulary from the old shared profile only to its verified owner; the new app can save an individual vocabulary profile itself. Old base64 `image_url` values remain readable behind entry RLS. Old remote image URLs are deliberately not fetched by the new app: copy those images into the owner's private bucket folder, set `image_path` to `<user UUID>/<unique photo>.jpg`, then remove any publicly accessible originals. The migration does not make old public images private automatically.
 
-## Learn More
+## AI use and costs
 
-To learn more about Next.js, take a look at the following resources:
+- A photo is resized to a JPEG, then sent to Google Gemini only when the signed-in user selects **Read handwriting**. The saved personal vocabulary is included as a transcription hint. The UI warns users before sending diary content.
+- Review applicable Google terms, region eligibility, and data handling before submitting private material. The app does not guarantee end-to-end encryption: the backend/AI provider processes scans.
+- Database limits allow **10 attempts per account per UTC day**, and **100 attempts for the whole project per UTC day**, shared across all Vercel instances. Attempts count even if Gemini fails. A signed-in caller can consume their own allowance directly; public signup should remain disabled for a private trial.
+- Gemini responses are capped at 8,192 output tokens. Incomplete results are rejected for recapture rather than silently saved. There are no automatic retries or fallback models. Provider quota failures stop the request.
+- These caps limit usage, **not money**. A billable Google project can still charge for allowed calls. Keep the Google project on the intended tier and configure quotas there; billing alerts alone are not a hard spending cap. Unlimited free hosting, AI, or storage is not promised.
+- New photos are stored privately, not as large base64 database strings. Each photo is capped at 2.25 MB. Monitor total storage/egress and export backups; no automatic paid upgrade is configured by this code.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scope
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Included: individual accounts, password recovery, private photos and rows, original/corrected text, page numbering, titles/dates/types, archive search/filtering, per-user vocabulary, text export, deletion, mobile layout, and a Home Screen web manifest. No offline cache stores diary pages. Internet is required.
 
-## Deploy on Vercel
+Lists are currently editable text. Interactive checkboxes, scheduled reminders, automatic page ordering, notifications, and chat bots are not implemented. Vocabulary is an explicit user-maintained hint; no model is trained or fine-tuned on handwriting.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Develop and verify
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Use Node.js 22 or later. Copy `.env.example` to `.env.local` and set your own project values. Never commit real credentials.
+
+```sh
+npm ci
+npm test
+npm run lint
+npm run build
+npm run dev
+```
+
+Database tests use an in-memory PostgreSQL runtime with minimal Supabase auth/storage schemas. They execute the actual migration, verify repeatability and legacy-row preservation, and exercise two-user row/storage isolation plus per-user/global quotas. They do not validate the live project's existing policies, Supabase email delivery, or Gemini handwriting accuracy.
+
+## Rollback
+
+Do not roll back database ownership policies to permissive access. The migration preserves old columns and entries, but the previous shared-passcode app cannot authenticate against the new private policies. If the new UI must be withdrawn, restrict app access while fixing it rather than reopening diary rows. Restore data only from a reviewed backup if required.
