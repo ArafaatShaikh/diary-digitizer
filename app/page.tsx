@@ -1,711 +1,899 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- Private signed URLs and local photo previews must not use a shared image optimizer. */
 
-import { useState, useEffect } from "react";
-import { 
-  Camera, Save, Sparkles, BookOpen, UserCheck, RefreshCw, 
-  Archive, Clock, Lock, Unlock, Download, Copy, Check, Trash2, 
-  ChevronRight, ArrowLeft, BookMarked, ArrowUp, ArrowDown
+import { useEffect, useState, type FormEvent } from "react";
+import type { Session } from "@supabase/supabase-js";
+import {
+  BookOpen,
+  Camera,
+  LogOut,
+  Search,
+  Plus,
+  Download,
+  Trash2,
+  ArrowLeft,
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { isConfigured, supabase } from "@/lib/supabase";
+import { preparePhoto } from "@/lib/photo";
 
-interface HandwritingProfile {
-  personal_lexicon: string[];
-  character_quirks: string[];
-}
-
-interface JournalEntry {
+type Kind = "journal" | "note" | "letter" | "list";
+const kinds: { value: Kind; label: string }[] = [
+  { value: "journal", label: "Journal" },
+  { value: "note", label: "Notes" },
+  { value: "letter", label: "Letter" },
+  { value: "list", label: "List" },
+];
+type Entry = {
   id: string;
+  title: string;
+  kind: Kind;
+  entry_date: string;
+  page_number: number | null;
+  image_path: string | null;
   image_url: string;
   raw_transcription: string;
   corrected_transcription: string;
-  page_number: number | null;
   created_at: string;
+};
+function message(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : "Something failed. Please try again.";
+}
+function localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const DEFAULT_PROFILE_ID = "00000000-0000-0000-0000-000000000001";
-
-export default function DiaryApp() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [passcode, setPasscode] = useState("");
+export default function Home() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [rawText, setRawText] = useState("");
-  const [correctedText, setCorrectedText] = useState("");
-  const [pageNumberInput, setPageNumberInput] = useState<number>(1);
-  const [loading, setLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
-  const [profile, setProfile] = useState<HandwritingProfile>({
-    personal_lexicon: [],
-    character_quirks: [],
-  });
-  
-  const [pastEntries, setPastEntries] = useState<JournalEntry[]>([]);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showEntriesModal, setShowEntriesModal] = useState(false);
-  const [archiveView, setArchiveView] = useState<"list" | "book" | "single">("list");
-  const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null);
-  const [copied, setCopied] = useState(false);
-
   useEffect(() => {
-    const savedAuth = localStorage.getItem("diary_authenticated");
-    if (savedAuth === "true") {
-      setIsAuthenticated(true);
-      fetchProfile();
-      fetchEntries();
-    } else {
-      setIsAuthenticated(false);
-    }
-  }, []);
-
-  const handleUnlock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthLoading(true);
-    setAuthError("");
-
-    try {
-      const res = await fetch("/api/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        localStorage.setItem("diary_authenticated", "true");
-        setIsAuthenticated(true);
-        fetchProfile();
-        fetchEntries();
-      } else {
-        setAuthError("Incorrect passcode. Try again.");
-      }
-    } catch {
-      setAuthError("Connection error. Try again.");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleLock = () => {
+    if (!isConfigured) return;
+    let active = true;
+    // Remove the old shared-passcode flag. It never represented a server session.
     localStorage.removeItem("diary_authenticated");
-    setIsAuthenticated(false);
-    setPasscode("");
-  };
-
-  const fetchProfile = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("personal_lexicon, character_quirks")
-        .eq("id", DEFAULT_PROFILE_ID)
-        .single();
-
-      if (data && !error) {
-        setProfile({
-          personal_lexicon: data.personal_lexicon || [],
-          character_quirks: data.character_quirks || [],
-        });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, next) => {
+      if (active) {
+        setSession(next);
+        setReady(true);
       }
-    } catch (err) {
-      console.error("Error loading profile from Supabase:", err);
-    }
-  };
-
-  const fetchEntries = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("entries")
-        .select("*")
-        .order("page_number", { ascending: true, nullsFirst: false })
-        .order("created_at", { ascending: true });
-
-      if (data && !error) {
-        setPastEntries(data as JournalEntry[]);
-        setPageNumberInput(data.length + 1);
+    });
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (active) {
+        if (error) setAuthError(error.message);
+        setSession(data.session);
+        setReady(true);
       }
-    } catch (err) {
-      console.error("Error loading entries from Supabase:", err);
-    }
-  };
-
-  const handleSwapOrder = async (indexA: number, indexB: number) => {
-    if (indexB < 0 || indexB >= pastEntries.length) return;
-    const entryA = pastEntries[indexA];
-    const entryB = pastEntries[indexB];
-
-    const orderA = entryB.page_number || indexB + 1;
-    const orderB = entryA.page_number || indexA + 1;
-
-    try {
-      await supabase.from("entries").update({ page_number: orderA }).eq("id", entryA.id);
-      await supabase.from("entries").update({ page_number: orderB }).eq("id", entryB.id);
-      await fetchEntries();
-    } catch (err) {
-      console.error("Error updating page order:", err);
-    }
-  };
-
-  const handleUpdatePageNumber = async (id: string, newPageNum: number) => {
-    try {
-      await supabase.from("entries").update({ page_number: newPageNum }).eq("id", id);
-      await fetchEntries();
-      if (selectedEntry?.id === id) {
-        setSelectedEntry((prev) => prev ? { ...prev, page_number: newPageNum } : null);
-      }
-    } catch (err) {
-      console.error("Error updating page number:", err);
-    }
-  };
-
-  const handleDeleteEntry = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this page from the archive?")) return;
-    try {
-      await supabase.from("entries").delete().eq("id", id);
-      setPastEntries((prev) => prev.filter((item) => item.id !== id));
-      if (selectedEntry?.id === id) {
-        setSelectedEntry(null);
-        setArchiveView("list");
-      }
-    } catch (err) {
-      console.error("Error deleting entry:", err);
-    }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setStatusMessage("");
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const fullString = reader.result as string;
-      const base64Data = fullString.split(",")[1];
-      setImageBase64(base64Data);
-      setImagePreview(fullString);
-      setRawText("");
-      setCorrectedText("");
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
     };
-    reader.readAsDataURL(file);
-  };
-
-  const handleTranscribe = async () => {
-    if (!imageBase64) return;
-    setLoading(true);
-    setStatusMessage("Reading manuscript using her personal handwriting profile...");
-
-    try {
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64,
-          mimeType: "image/jpeg",
-          handwritingProfile: profile,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      setRawText(data.text);
-      setCorrectedText(data.text);
-      setStatusMessage("Transcribed! Review text and confirm page number below.");
-    } catch (err: any) {
-      setStatusMessage(`Error: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSaveAndLearn = async () => {
-    setLoading(true);
-    setStatusMessage("Analyzing corrections and saving to her permanent archive...");
-
-    try {
-      const res = await fetch("/api/learn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawTranscription: rawText,
-          correctedTranscription: correctedText,
-          existingProfile: profile,
-        }),
-      });
-      const data = await res.json();
-
-      const updatedProfile = data.updatedProfile || profile;
-      setProfile(updatedProfile);
-
-      await supabase
-        .from("profiles")
-        .update({
-          personal_lexicon: updatedProfile.personal_lexicon,
-          character_quirks: updatedProfile.character_quirks,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", DEFAULT_PROFILE_ID);
-
-      await supabase.from("entries").insert({
-        image_url: imagePreview || "",
-        raw_transcription: rawText,
-        corrected_transcription: correctedText,
-        page_number: pageNumberInput,
-      });
-
-      await fetchEntries();
-      setStatusMessage(`Saved! Page ${pageNumberInput} archived & handwriting memory updated.`);
-    } catch (err: any) {
-      setStatusMessage(`Error saving: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getCompiledText = () => {
-    return pastEntries
-      .map((entry, idx) => {
-        const displayPage = entry.page_number || idx + 1;
-        return `═══════════════════════════════════════\nPAGE ${displayPage}\n═══════════════════════════════════════\n\n${entry.corrected_transcription}\n\n`;
-      })
-      .join("\n");
-  };
-
-  const handleCopyCompiled = () => {
-    navigator.clipboard.writeText(getCompiledText());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleDownloadCompiled = () => {
-    const text = getCompiledText();
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `diary_manuscript_${new Date().toISOString().split("T")[0]}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  if (isAuthenticated === null) return null;
-
-  if (!isAuthenticated) {
+  }, []);
+  if (!isConfigured)
     return (
-      <main className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4 font-serif">
-        <div className="max-w-md w-full bg-white p-8 rounded-xl border border-stone-200 shadow-sm text-center">
-          <div className="w-12 h-12 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-4 text-stone-700">
-            <Lock size={22} />
-          </div>
-          <h1 className="text-2xl font-light text-stone-900 mb-1">Private Journal</h1>
-          <p className="text-xs font-sans text-stone-500 mb-6">Enter the passcode to view and digitize entries.</p>
-
-          <form onSubmit={handleUnlock} className="space-y-4 font-sans">
-            <input
-              type="password"
-              value={passcode}
-              onChange={(e) => setPasscode(e.target.value)}
-              placeholder="Enter passcode"
-              className="w-full px-4 py-2.5 text-center text-lg tracking-widest text-stone-900 bg-white placeholder:text-stone-400 border border-stone-400 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-800 focus:border-stone-800"
-              autoFocus
-            />
-
-            {authError && <p className="text-xs text-rose-600">{authError}</p>}
-
-            <button
-              type="submit"
-              disabled={authLoading || !passcode}
-              className="w-full bg-stone-900 hover:bg-stone-800 text-white py-2.5 rounded-md text-sm font-medium transition disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <Unlock size={16} /> {authLoading ? "Verifying..." : "Unlock Journal"}
-            </button>
-          </form>
-        </div>
+      <main className="auth">
+        <BookOpen size={36} />
+        <h1>Connect your journal</h1>
+        <p>
+          Add the public Supabase URL and anon key to Vercel, then redeploy. See
+          the repository README for setup.
+        </p>
       </main>
     );
+  if (!ready)
+    return (
+      <main className="auth">
+        <p role="status">Opening your journal…</p>
+      </main>
+    );
+  if (!session) return <SignIn initialError={authError} />;
+  return <Workspace key={session.user.id} session={session} />;
+}
+
+function SignIn({ initialError }: { initialError: string }) {
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(initialError);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setStatus("");
+    try {
+      if (mode === "reset") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${location.origin}/reset-password`,
+        });
+        if (error) throw error;
+        setStatus(
+          "If this email has an account, a password reset link is on its way.",
+        );
+      } else if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: location.origin },
+        });
+        if (error) throw error;
+        if (!data.session)
+          setStatus("Check your email to confirm your account, then sign in.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+      }
+    } catch (error) {
+      setStatus(message(error));
+    } finally {
+      setBusy(false);
+    }
   }
-
   return (
-    <main className="min-h-screen bg-[#FDFBF7] text-stone-800 p-4 md:p-8 font-serif">
-      <header className="max-w-6xl mx-auto mb-8 border-b border-stone-200 pb-4 flex flex-wrap justify-between items-center gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-normal tracking-wide text-stone-900 flex items-center gap-2">
-            <BookOpen className="text-stone-700" size={28} /> Manuscript & Letters
-          </h1>
-          <p className="text-xs md:text-sm font-sans text-stone-500 mt-1">
-            Personal diary digitizer with adaptive handwriting calibration
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 font-sans text-sm">
-          <button
-            onClick={() => {
-              setArchiveView("list");
-              setShowEntriesModal(true);
-            }}
-            className="border border-stone-300 hover:bg-stone-50 text-stone-700 px-3 py-2 rounded flex items-center gap-2 transition"
-          >
-            <Archive size={16} /> Archive ({pastEntries.length})
-          </button>
-
-          <button
-            onClick={() => setShowProfileModal(!showProfileModal)}
-            className="border border-stone-300 hover:bg-stone-50 text-stone-700 px-3 py-2 rounded flex items-center gap-2 transition"
-          >
-            <UserCheck size={16} /> Memory ({profile.character_quirks.length + profile.personal_lexicon.length})
-          </button>
-
-          <label className="cursor-pointer bg-stone-900 hover:bg-stone-800 text-stone-100 px-4 py-2 rounded flex items-center gap-2 transition shadow-sm">
-            <Camera size={16} /> Scan Page
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} />
+    <main className="auth">
+      <div className="brand-mark">
+        <BookOpen size={30} />
+      </div>
+      <p className="eyebrow">Paper, kept close</p>
+      <h1>
+        Your words,
+        <br />a little easier to find.
+      </h1>
+      <p>
+        Keep writing by hand. Save your pages in your own searchable journal.
+      </p>
+      <form onSubmit={submit} className="stack">
+        <h2>
+          {mode === "signup"
+            ? "Create your account"
+            : mode === "reset"
+              ? "Reset your password"
+              : "Welcome back"}
+        </h2>
+        <label>
+          Email
+          <input
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+        {mode !== "reset" && (
+          <label>
+            Password
+            <input
+              type="password"
+              autoComplete={
+                mode === "signup" ? "new-password" : "current-password"
+              }
+              minLength={8}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+            />
           </label>
-
+        )}
+        {status && (
+          <p className="notice" role="status">
+            {status}
+          </p>
+        )}
+        <button disabled={busy}>
+          {busy
+            ? "Please wait…"
+            : mode === "signup"
+              ? "Create account"
+              : mode === "reset"
+                ? "Send reset link"
+                : "Sign in"}
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          disabled={busy}
+          onClick={() => {
+            setMode(mode === "signup" ? "signin" : "signup");
+            setStatus("");
+          }}
+        >
+          {mode === "signup"
+            ? "Already have an account? Sign in"
+            : "New here? Create an account"}
+        </button>
+        {mode === "signin" && (
           <button
-            onClick={handleLock}
-            title="Lock Journal"
-            className="p-2 border border-stone-300 hover:bg-stone-100 text-stone-600 rounded transition"
+            type="button"
+            className="text-button"
+            disabled={busy}
+            onClick={() => {
+              setMode("reset");
+              setStatus("");
+            }}
           >
-            <Lock size={16} />
+            Forgot password?
+          </button>
+        )}
+        {mode === "reset" && (
+          <button
+            type="button"
+            className="text-button"
+            disabled={busy}
+            onClick={() => setMode("signin")}
+          >
+            Back to sign in
+          </button>
+        )}
+      </form>
+      <p className="small">
+        On iPhone: Share → Add to Home Screen. An internet connection is
+        required.
+      </p>
+    </main>
+  );
+}
+
+function PagePhoto({ entry }: { entry: Entry }) {
+  const [src, setSrc] = useState(
+    entry.image_url?.startsWith("data:image/") ? entry.image_url : "",
+  );
+  const [failed, setFailed] = useState(
+    !entry.image_path && !entry.image_url?.startsWith("data:image/"),
+  );
+  useEffect(() => {
+    let active = true;
+    if (entry.image_path) {
+      void supabase.storage
+        .from("diary-pages")
+        .createSignedUrl(entry.image_path, 3600)
+        .then(({ data, error }) => {
+          if (active) {
+            setSrc(data?.signedUrl || "");
+            setFailed(Boolean(error));
+          }
+        });
+    }
+    // Legacy public URLs are not fetched automatically; see the migration guide.
+    return () => {
+      active = false;
+    };
+  }, [entry.id, entry.image_path, entry.image_url]);
+  return src ? (
+    <img
+      className="page-photo"
+      src={src}
+      alt="Original handwritten page"
+      onError={() => {
+        setSrc("");
+        setFailed(true);
+      }}
+    />
+  ) : (
+    <p className="small">
+      {failed
+        ? "Original photo unavailable. Your saved text is still here."
+        : "Loading original photo…"}
+    </p>
+  );
+}
+
+function Workspace({ session }: { session: Session }) {
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [revision, setRevision] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [editor, setEditor] = useState(false);
+  const [selected, setSelected] = useState<Entry | null>(null);
+  const [photo, setPhoto] = useState("");
+  const [raw, setRaw] = useState("");
+  const [text, setText] = useState("");
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<Kind>("journal");
+  const [date, setDate] = useState(localDate());
+  const [page, setPage] = useState(1);
+  const [vocabulary, setVocabulary] = useState("");
+  const [preferences, setPreferences] = useState(false);
+  useEffect(() => {
+    let active = true;
+    async function loadEntries() {
+      const pages: Entry[] = [];
+      try {
+        for (let offset = 0; active; offset += 200) {
+          const { data, error } = await supabase
+            .from("entries")
+            .select("*")
+            .eq("user_id", session.user.id)
+            .order("entry_date", { ascending: false })
+            .order("page_number", { ascending: true })
+            .order("id", { ascending: true })
+            .range(offset, offset + 199);
+          if (error) throw error;
+          pages.push(...(data || []));
+          if (!data || data.length < 200) break;
+        }
+        if (active) {
+          setEntries(pages);
+          setLoaded(true);
+        }
+      } catch (error) {
+        if (active) {
+          setStatus(`Could not load your pages: ${message(error)}`);
+          setLoaded(false);
+        }
+      }
+    }
+    void loadEntries();
+    return () => {
+      active = false;
+    };
+  }, [session.user.id, revision]);
+  useEffect(() => {
+    let active = true;
+    void supabase
+      .from("profiles")
+      .select("personal_lexicon")
+      .eq("id", session.user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error)
+          setStatus(`Could not load your vocabulary: ${error.message}`);
+        else setVocabulary((data?.personal_lexicon || []).join("\n"));
+      });
+    return () => {
+      active = false;
+    };
+  }, [session.user.id]);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (editor) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [editor]);
+  function open(entry: Entry | null) {
+    if (editor && !confirm("Discard the current draft?")) return;
+    setSelected(entry);
+    setPhoto("");
+    setRaw(entry?.raw_transcription || "");
+    setText(entry?.corrected_transcription || "");
+    setTitle(entry?.title || "");
+    setKind(entry?.kind || "journal");
+    setDate(entry?.entry_date || localDate());
+    setPage(entry?.page_number || entries.length + 1);
+    setEditor(true);
+    setStatus("");
+  }
+  async function scan(file?: File) {
+    if (!file) return;
+    if ((text || photo) && !confirm("Replace the current photo and text?"))
+      return;
+    setBusy(true);
+    setStatus("");
+    try {
+      const image = await preparePhoto(file);
+      setPhoto(image);
+      setRaw("");
+      setText("");
+      setSelected(null);
+    } catch (error) {
+      setStatus(message(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function transcribe() {
+    if (text && !confirm("Replace the current text with a new transcription?"))
+      return;
+    setBusy(true);
+    setStatus("Reading your page…");
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data.session)
+        throw new Error("Sign in again to scan this page.");
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${data.session.access_token}`,
+        },
+        body: JSON.stringify({
+          imageBase64: photo.split(",")[1],
+          mimeType: "image/jpeg",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Could not transcribe this page.");
+      setRaw(result.text);
+      setText(result.text);
+      setStatus(
+        "Read through the text, check [unclear] words, and save when ready.",
+      );
+    } catch (error) {
+      setStatus(message(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function save() {
+    if (!text.trim()) return;
+    setBusy(true);
+    setStatus("Saving your page…");
+    let uploaded: string | null = null;
+    try {
+      const id = selected?.id || crypto.randomUUID();
+      let imagePath = selected?.image_path || null;
+      if (photo) {
+        imagePath = `${session.user.id}/${id}.jpg`;
+        const blob = await (await fetch(photo)).blob();
+        const { error } = await supabase.storage
+          .from("diary-pages")
+          .upload(imagePath, blob, {
+            contentType: "image/jpeg",
+            upsert: false,
+          });
+        if (error) throw error;
+        uploaded = imagePath;
+      }
+      const record = {
+        title: title.trim() || "Untitled page",
+        kind,
+        entry_date: date,
+        page_number: page,
+        raw_transcription: raw,
+        corrected_transcription: text,
+        image_path: imagePath,
+        image_url: selected?.image_url || "",
+      };
+      const result = selected
+        ? await supabase
+            .from("entries")
+            .update(record)
+            .eq("id", id)
+            .eq("user_id", session.user.id)
+            .select("id")
+            .single()
+        : await supabase
+            .from("entries")
+            .insert({ ...record, id, user_id: session.user.id })
+            .select("id")
+            .single();
+      if (result.error) throw result.error;
+      uploaded = null;
+      setEditor(false);
+      setSelected(null);
+      setPhoto("");
+      setText("");
+      setRaw("");
+      setRevision((r) => r + 1);
+      setStatus("Page saved to your archive.");
+    } catch (error) {
+      if (uploaded) {
+        const { error: cleanupError } = await supabase.storage
+          .from("diary-pages")
+          .remove([uploaded]);
+        if (cleanupError)
+          setStatus(
+            "Save failed and photo cleanup failed. Your draft is still here.",
+          );
+      }
+      setStatus(
+        `Page was not saved: ${message(error)} Your draft is still here.`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(entry: Entry) {
+    if (!confirm(`Delete “${entry.title}”? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from("entries")
+        .delete()
+        .eq("id", entry.id)
+        .eq("user_id", session.user.id)
+        .select("id")
+        .single();
+      if (error) throw error;
+      setEntries((old) => old.filter((e) => e.id !== entry.id));
+      setEditor(false);
+      setSelected(null);
+      setPhoto("");
+      setText("");
+      if (entry.image_path) {
+        const { error: cleanupError } = await supabase.storage
+          .from("diary-pages")
+          .remove([entry.image_path]);
+        if (cleanupError) {
+          setStatus(
+            "Page deleted, but its photo could not be removed. Ask the project owner to clean up storage.",
+          );
+          return;
+        }
+      }
+      setStatus("Page deleted.");
+    } catch (error) {
+      setStatus(`Could not delete: ${message(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveVocabulary() {
+    setBusy(true);
+    const { error } = await supabase.from("profiles").upsert({
+      id: session.user.id,
+      email: session.user.email,
+      personal_lexicon: [
+        ...new Set(
+          vocabulary
+            .split("\n")
+            .map((v) => v.trim())
+            .filter(Boolean),
+        ),
+      ]
+        .slice(0, 50)
+        .map((v) => v.slice(0, 80)),
+      updated_at: new Date().toISOString(),
+    });
+    setBusy(false);
+    setStatus(
+      error
+        ? `Could not save vocabulary: ${error.message}`
+        : "Personal vocabulary saved.",
+    );
+    if (!error) setPreferences(false);
+  }
+  function download() {
+    const content = entries
+      .map(
+        (e) =>
+          `${e.title}\n${e.entry_date} · ${e.kind} · Page ${e.page_number || "?"}\n\n${e.corrected_transcription}`,
+      )
+      .join("\n\n--------------------\n\n");
+    const url = URL.createObjectURL(
+      new Blob([content], { type: "text/plain;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `my-pages-${localDate()}.txt`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  const visible = entries.filter(
+    (e) =>
+      (filter === "all" || e.kind === filter) &&
+      `${e.title} ${e.corrected_transcription} ${e.entry_date}`
+        .toLocaleLowerCase()
+        .includes(query.toLocaleLowerCase()),
+  );
+  return (
+    <main className="workspace">
+      <header>
+        <div className="brand">
+          <BookOpen size={26} /> Paper, kept close
+        </div>
+        <div className="header-actions">
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() => setPreferences((p) => !p)}
+          >
+            Vocabulary
+          </button>
+          <button
+            className="icon-button secondary"
+            aria-label="Sign out"
+            disabled={busy}
+            onClick={async () => {
+              if (editor && !confirm("Discard your draft and sign out?"))
+                return;
+              const { error } = await supabase.auth.signOut();
+              if (error) setStatus(error.message);
+            }}
+          >
+            <LogOut size={19} />
           </button>
         </div>
       </header>
-
-      {statusMessage && (
-        <div className="max-w-6xl mx-auto mb-6 p-3 bg-stone-100 border border-stone-300 rounded font-sans text-xs md:text-sm text-stone-700 flex items-center justify-between">
-          <span>{statusMessage}</span>
-          {loading && <RefreshCw className="animate-spin text-stone-500" size={14} />}
-        </div>
+      <div className="intro">
+        <p className="eyebrow">Your private collection</p>
+        <h1>A home for your handwritten pages.</h1>
+        <p>Notes, letters, lists, and the days you want to remember.</p>
+        <p className="small">Signed in as {session.user.email}</p>
+      </div>
+      {status && (
+        <p className="notice" role="status">
+          {status}
+        </p>
       )}
-
-      {imagePreview ? (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-white p-5 rounded-lg border border-stone-200 shadow-sm flex flex-col">
-            <h2 className="text-xs font-sans uppercase tracking-widest text-stone-400 mb-3">Original Manuscript</h2>
-            <div className="flex-grow flex items-center justify-center bg-stone-50 rounded border border-dashed border-stone-200 p-2 overflow-hidden">
-              <img src={imagePreview} alt="Manuscript" className="max-h-[600px] w-auto object-contain rounded" />
-            </div>
-
-            {!rawText && (
+      {preferences && (
+        <section className="panel stack">
+          <h2>Names and words you often write</h2>
+          <p>
+            Add one word or name per line, up to 50. These hints belong to your
+            account and are sent to Gemini with your scans.
+          </p>
+          <label>
+            Personal vocabulary
+            <textarea
+              rows={5}
+              value={vocabulary}
+              onChange={(e) => setVocabulary(e.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <button disabled={busy} onClick={saveVocabulary}>
+            Save vocabulary
+          </button>
+        </section>
+      )}
+      {editor ? (
+        <section className="panel">
+          <div className="row spread">
+            <button
+              className="text-button"
+              disabled={busy}
+              onClick={() => {
+                if (confirm("Discard changes and return to your archive?")) {
+                  setEditor(false);
+                  setPhoto("");
+                  setSelected(null);
+                  setText("");
+                }
+              }}
+            >
+              <ArrowLeft size={16} /> Back to archive
+            </button>
+            {selected && (
               <button
-                onClick={handleTranscribe}
-                disabled={loading}
-                className="mt-4 w-full bg-stone-900 hover:bg-stone-800 text-white py-2.5 rounded font-sans text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
+                className="danger text-button"
+                disabled={busy}
+                onClick={() => remove(selected)}
               >
-                <Sparkles size={16} /> {loading ? "Analyzing Penmanship..." : "Transcribe Manuscript"}
+                <Trash2 size={16} /> Delete page
               </button>
             )}
           </div>
-
-          <div className="bg-white p-5 rounded-lg border border-stone-200 shadow-sm flex flex-col">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-xs font-sans uppercase tracking-widest text-stone-400">Digital Version (Editable)</h2>
-              <div className="flex items-center gap-2 font-sans text-xs">
-                <span className="text-stone-500">Page #:</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={pageNumberInput}
-                  onChange={(e) => setPageNumberInput(parseInt(e.target.value) || 1)}
-                  className="w-16 px-2 py-0.5 border border-stone-300 rounded text-center text-stone-800 font-semibold"
+          <div className="editor-grid">
+            <div className="stack">
+              <h2>{selected ? "Original page" : "Start with a photo"}</h2>
+              {photo ? (
+                <img
+                  src={photo}
+                  className="page-photo"
+                  alt="Photo ready to transcribe"
                 />
-              </div>
+              ) : selected ? (
+                <PagePhoto key={selected.id} entry={selected} />
+              ) : (
+                <div className="photo-placeholder">
+                  <Camera size={40} />
+                  <p>Photograph the whole page in good light.</p>
+                </div>
+              )}
+              {!selected && (
+                <>
+                  <label className="upload-button">
+                    <Camera size={18} />{" "}
+                    {photo
+                      ? "Choose a different photo"
+                      : "Take or choose a photo"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={busy}
+                      onChange={(e) => {
+                        void scan(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <p className="small">
+                    Your photo is resized before upload. Scanning sends it to
+                    Google Gemini. Check that you are comfortable sharing its
+                    contents.
+                  </p>
+                </>
+              )}
+              {photo && (
+                <button disabled={busy} onClick={transcribe}>
+                  {busy
+                    ? "Please wait…"
+                    : text
+                      ? "Read photo again"
+                      : "Read handwriting"}
+                </button>
+              )}
             </div>
-
-            <textarea
-              className="w-full flex-grow p-4 border border-stone-200 rounded-md text-stone-900 bg-[#FCFBF9] leading-relaxed focus:outline-none focus:ring-1 focus:ring-stone-400 min-h-[450px] text-base"
-              value={correctedText}
-              onChange={(e) => setCorrectedText(e.target.value)}
-              placeholder="The transcribed page will appear here..."
-            />
-
-            <button
-              onClick={handleSaveAndLearn}
-              disabled={loading || !correctedText}
-              className="mt-4 bg-stone-900 hover:bg-stone-800 text-white py-2.5 rounded font-sans text-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
+            <form
+              className="stack"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void save();
+              }}
             >
-              <Save size={16} /> {loading ? "Saving..." : `Save Page ${pageNumberInput} & Adapt AI`}
+              <h2>{selected ? "Edit your page" : "Review and save"}</h2>
+              <label>
+                Title
+                <input
+                  maxLength={160}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  disabled={busy}
+                  placeholder="Give this page a name"
+                />
+              </label>
+              <div className="field-grid">
+                <label>
+                  Save as
+                  <select
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value as Kind)}
+                    disabled={busy}
+                  >
+                    {kinds.map((k) => (
+                      <option key={k.value} value={k.value}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Written on
+                  <input
+                    type="date"
+                    required
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <label>
+                  Page number
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000000}
+                    required
+                    value={page}
+                    onChange={(e) => setPage(Number(e.target.value))}
+                    disabled={busy}
+                  />
+                </label>
+              </div>
+              <label>
+                Page text
+                <textarea
+                  className="transcription"
+                  required
+                  rows={14}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  disabled={busy}
+                  placeholder="Your transcription appears here. You can also type a page yourself."
+                />
+              </label>
+              <p className="small">
+                Your wording stays yours. Check unclear words, spelling, and
+                numbers before saving.
+              </p>
+              <button disabled={busy || !text.trim()}>
+                {busy ? "Please wait…" : "Save to my archive"}
+              </button>
+            </form>
+          </div>
+        </section>
+      ) : (
+        <>
+          <div className="toolbar">
+            <label className="search">
+              <Search size={18} />
+              <input
+                aria-label="Search your pages"
+                placeholder="Search titles, words, or dates"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            <select
+              aria-label="Filter by type"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="all">All pages</option>
+              {kinds.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+            <button onClick={() => open(null)} disabled={busy}>
+              <Plus size={18} /> Add a page
             </button>
           </div>
-        </div>
-      ) : (
-        <div className="max-w-2xl mx-auto mt-16 p-12 text-center border-2 border-dashed border-stone-300 rounded-xl bg-white/60">
-          <BookOpen className="mx-auto text-stone-400 mb-4" size={44} />
-          <h2 className="text-xl font-medium text-stone-800 mb-2">No page selected</h2>
-          <p className="text-stone-500 font-sans text-sm mb-6">
-            Upload or take a photo of a handwritten journal page or letter to begin.
-          </p>
-          <label className="inline-flex cursor-pointer bg-stone-900 hover:bg-stone-800 text-white px-5 py-2.5 rounded font-sans text-sm items-center gap-2 transition">
-            <Camera size={16} /> Select or Snap Photo
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} />
-          </label>
-        </div>
-      )}
-
-      {/* Archive Modal */}
-      {showEntriesModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 md:p-6 z-50">
-          <div className="bg-[#FAF9F5] max-w-4xl w-full rounded-xl border border-stone-300 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="bg-white px-6 py-4 border-b border-stone-200 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                {archiveView !== "list" && (
-                  <button
-                    onClick={() => setArchiveView("list")}
-                    className="p-1 hover:bg-stone-100 rounded text-stone-600 transition"
-                    title="Back to list"
-                  >
-                    <ArrowLeft size={18} />
-                  </button>
-                )}
-                <div>
-                  <h3 className="text-lg font-serif font-medium text-stone-900 flex items-center gap-2">
-                    <Archive size={18} />
-                    {archiveView === "book" ? "Full Compiled Manuscript" : archiveView === "single" ? "Journal Page" : "Digitized Archive"}
-                  </h3>
-                  <p className="text-xs font-sans text-stone-400">
-                    {pastEntries.length} {pastEntries.length === 1 ? "page" : "pages"} sorted in sequence
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 font-sans text-xs">
-                {pastEntries.length > 0 && archiveView === "list" && (
-                  <button
-                    onClick={() => setArchiveView("book")}
-                    className="bg-stone-900 hover:bg-stone-800 text-white px-3 py-1.5 rounded flex items-center gap-1.5 transition"
-                  >
-                    <BookMarked size={14} /> Read as Book
-                  </button>
-                )}
-
-                {archiveView === "book" && (
-                  <>
-                    <button
-                      onClick={handleCopyCompiled}
-                      className="border border-stone-300 hover:bg-stone-100 text-stone-700 px-3 py-1.5 rounded flex items-center gap-1.5 transition"
-                    >
-                      {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                      {copied ? "Copied" : "Copy All"}
-                    </button>
-                    <button
-                      onClick={handleDownloadCompiled}
-                      className="bg-stone-900 hover:bg-stone-800 text-white px-3 py-1.5 rounded flex items-center gap-1.5 transition"
-                    >
-                      <Download size={14} /> Export .txt
-                    </button>
-                  </>
-                )}
-
-                <button
-                  onClick={() => setShowEntriesModal(false)}
-                  className="text-stone-400 hover:text-stone-700 text-lg ml-2 px-2"
-                >
-                  ✕
+          <div className="row spread">
+            <p className="small">
+              {loaded
+                ? `${entries.length} saved ${entries.length === 1 ? "page" : "pages"}`
+                : "Loading your archive…"}
+            </p>
+            <button
+              className="text-button"
+              onClick={download}
+              disabled={!loaded || !entries.length}
+            >
+              <Download size={16} /> Export all text
+            </button>
+          </div>
+          {!loaded ? (
+            <button
+              className="secondary"
+              onClick={() => setRevision((r) => r + 1)}
+            >
+              Reload archive
+            </button>
+          ) : !visible.length ? (
+            <section className="empty">
+              <BookOpen size={42} />
+              <h2>
+                {entries.length
+                  ? "No matching pages"
+                  : "Your first page starts here."}
+              </h2>
+              <p>
+                {entries.length
+                  ? "Try a different search or type."
+                  : "Take a photo of your notebook, review the words, and save."}
+              </p>
+              {!entries.length && (
+                <button onClick={() => open(null)}>
+                  <Camera size={18} /> Add your first page
                 </button>
-              </div>
+              )}
+            </section>
+          ) : (
+            <div className="cards">
+              {visible.map((entry) => (
+                <button
+                  className="entry-card"
+                  key={entry.id}
+                  onClick={() => open(entry)}
+                >
+                  <span className="eyebrow">
+                    {kinds.find((k) => k.value === entry.kind)?.label ||
+                      "Journal"}{" "}
+                    · {entry.entry_date}
+                  </span>
+                  <h2>{entry.title || "Untitled page"}</h2>
+                  <p>{entry.corrected_transcription}</p>
+                  <span className="small">
+                    Page {entry.page_number || "—"} · Open page →
+                  </span>
+                </button>
+              ))}
             </div>
-
-            <div className="overflow-y-auto p-6 flex-grow">
-              {/* Cards List with Reordering Controls */}
-              {archiveView === "list" && (
-                <div className="space-y-3">
-                  {pastEntries.length === 0 ? (
-                    <div className="text-center py-12 text-stone-400 font-sans text-sm">
-                      No entries archived yet. Transcribe and save a page to see it here.
-                    </div>
-                  ) : (
-                    pastEntries.map((entry, idx) => (
-                      <div
-                        key={entry.id}
-                        onClick={() => {
-                          setSelectedEntry(entry);
-                          setArchiveView("single");
-                        }}
-                        className="p-4 border border-stone-200 bg-white hover:border-stone-400 rounded-lg cursor-pointer transition shadow-xs group flex items-start gap-4"
-                      >
-                        {/* Quick Page Reordering Controls */}
-                        <div 
-                          className="flex flex-col items-center justify-center bg-stone-50 border border-stone-200 rounded p-1.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            disabled={idx === 0}
-                            onClick={() => handleSwapOrder(idx, idx - 1)}
-                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 transition"
-                            title="Move earlier"
-                          >
-                            <ArrowUp size={14} />
-                          </button>
-                          <span className="font-sans font-bold text-xs text-stone-700 my-0.5">
-                            p.{entry.page_number || idx + 1}
-                          </span>
-                          <button
-                            disabled={idx === pastEntries.length - 1}
-                            onClick={() => handleSwapOrder(idx, idx + 1)}
-                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 transition"
-                            title="Move later"
-                          >
-                            <ArrowDown size={14} />
-                          </button>
-                        </div>
-
-                        {/* Card Content */}
-                        <div className="flex-grow min-w-0">
-                          <div className="flex justify-between items-start mb-1.5">
-                            <div className="flex items-center gap-1.5 text-xs text-stone-500 font-sans">
-                              <Clock size={12} />
-                              {new Date(entry.created_at).toLocaleDateString(undefined, {
-                                weekday: "short",
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteEntry(entry.id);
-                                }}
-                                title="Delete entry"
-                                className="text-stone-300 hover:text-rose-600 p-1 transition"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                              <ChevronRight size={16} className="text-stone-300 group-hover:text-stone-700 transition" />
-                            </div>
-                          </div>
-                          <p className="font-serif text-sm text-stone-800 whitespace-pre-wrap leading-relaxed line-clamp-2">
-                            {entry.corrected_transcription}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* Single Entry Inspector */}
-              {archiveView === "single" && selectedEntry && (
-                <div className="max-w-2xl mx-auto space-y-6">
-                  <div className="flex justify-between items-center pb-3 border-b border-stone-200">
-                    <div className="flex items-center gap-3 font-sans text-xs text-stone-600">
-                      <span>Page:</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={selectedEntry.page_number || ""}
-                        onChange={(e) => handleUpdatePageNumber(selectedEntry.id, parseInt(e.target.value) || 1)}
-                        className="w-16 px-2 py-1 border border-stone-300 rounded text-center font-bold text-stone-800"
-                      />
-                    </div>
-                    <button
-                      onClick={() => handleDeleteEntry(selectedEntry.id)}
-                      className="text-xs font-sans text-rose-600 hover:text-rose-800 flex items-center gap-1"
-                    >
-                      <Trash2 size={13} /> Delete Page
-                    </button>
-                  </div>
-
-                  {selectedEntry.image_url && (
-                    <div className="bg-white p-3 border border-stone-200 rounded-lg shadow-xs flex justify-center">
-                      <img
-                        src={selectedEntry.image_url}
-                        alt="Original manuscript page"
-                        className="max-h-[350px] w-auto object-contain rounded"
-                      />
-                    </div>
-                  )}
-
-                  <div className="bg-white p-6 rounded-lg border border-stone-200 shadow-xs">
-                    <h4 className="text-xs font-sans uppercase tracking-widest text-stone-400 mb-3">Digitized Text</h4>
-                    <p className="font-serif text-base text-stone-900 leading-relaxed whitespace-pre-wrap">
-                      {selectedEntry.corrected_transcription}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Compiled Book View */}
-              {archiveView === "book" && (
-                <div className="max-w-2xl mx-auto bg-white p-8 md:p-12 rounded-lg border border-stone-200 shadow-sm font-serif">
-                  <div className="text-center mb-10 pb-6 border-b border-stone-200">
-                    <h2 className="text-2xl font-normal text-stone-900 tracking-wide mb-1">Journal & Letters</h2>
-                    <p className="text-xs font-sans text-stone-400">Complete manuscript in sequential order</p>
-                  </div>
-
-                  <div className="space-y-12">
-                    {pastEntries.map((entry, idx) => (
-                      <article key={entry.id} className="relative">
-                        <div className="flex items-center gap-3 mb-4">
-                          <span className="font-sans text-xs tracking-widest uppercase font-semibold text-stone-500">
-                            Page {entry.page_number || idx + 1}
-                          </span>
-                          <div className="flex-grow border-t border-stone-200" />
-                          <span className="text-xs font-sans text-stone-400">
-                            {new Date(entry.created_at).toLocaleDateString(undefined, {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </span>
-                        </div>
-                        <p className="text-stone-900 leading-loose text-base whitespace-pre-wrap">
-                          {entry.corrected_transcription}
-                        </p>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
-
-      {/* Memory Profile Modal */}
-      {showProfileModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white max-w-lg w-full rounded-lg p-6 border border-stone-200 font-sans">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-stone-900">Learned Penmanship Profile</h3>
-              <button onClick={() => setShowProfileModal(false)} className="text-stone-400 hover:text-stone-700">✕</button>
-            </div>
-
-            <div className="space-y-4 text-sm text-stone-700 max-h-[60vh] overflow-y-auto">
-              <div>
-                <h4 className="font-semibold text-xs text-stone-500 uppercase tracking-wider mb-1">Personal Names & Lexicon:</h4>
-                {profile.personal_lexicon.length === 0 ? (
-                  <p className="text-xs text-stone-400 italic">No custom words logged yet.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {profile.personal_lexicon.map((word, i) => (
-                      <span key={i} className="px-2 py-0.5 bg-stone-100 border border-stone-200 rounded text-xs">{word}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h4 className="font-semibold text-xs text-stone-500 uppercase tracking-wider mb-1">Observed Character Habits:</h4>
-                {profile.character_quirks.length === 0 ? (
-                  <p className="text-xs text-stone-400 italic">No penmanship quirks recorded yet.</p>
-                ) : (
-                  <ul className="list-disc pl-4 text-xs space-y-1 text-stone-600">
-                    {profile.character_quirks.map((quirk, i) => (
-                      <li key={i}>{quirk}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end">
-              <button onClick={() => setShowProfileModal(false)} className="px-4 py-2 bg-stone-900 text-white rounded text-xs">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <footer>
+        Your archive is private to your account. On iPhone, use Share → Add to
+        Home Screen.
+      </footer>
     </main>
   );
 }
