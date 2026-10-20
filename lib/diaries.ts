@@ -2,6 +2,7 @@ export type Diary = {
   id: string;
   title: string;
   description: string;
+  cover_path: string | null;
   created_at: string;
 };
 export type OrderedPage = {

@@ -1,4 +1,7 @@
-export async function preparePhoto(file: File): Promise<string> {
+export async function preparePhoto(
+  file: File,
+  { maxDimension = 2000, maxBase64Length = 3_000_000 } = {},
+): Promise<string> {
   if (file.size > 25_000_000)
     throw new Error("Choose a photo smaller than 25 MB.");
   const url = URL.createObjectURL(file);
@@ -8,7 +11,10 @@ export async function preparePhoto(file: File): Promise<string> {
     await image.decode().catch(() => {
       throw new Error("Could not open this photo. Try a JPEG or PNG.");
     });
-    const scale = Math.min(1, 2000 / Math.max(image.width, image.height));
+    const scale = Math.min(
+      1,
+      maxDimension / Math.max(image.width, image.height),
+    );
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(image.width * scale));
     canvas.height = Math.max(1, Math.round(image.height * scale));
@@ -20,7 +26,7 @@ export async function preparePhoto(file: File): Promise<string> {
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     for (const quality of [0.85, 0.7, 0.5]) {
       const data = canvas.toDataURL("image/jpeg", quality);
-      if (data.split(",")[1].length <= 3_000_000) return data;
+      if (data.split(",")[1].length <= maxBase64Length) return data;
     }
     throw new Error("Photo is too large. Crop it and try again.");
   } finally {

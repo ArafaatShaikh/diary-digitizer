@@ -289,6 +289,37 @@ function PagePhoto({ entry }: { entry: Entry }) {
   );
 }
 
+function DiaryCover({ diary }: { diary: Diary }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    let active = true;
+    if (diary.cover_path) {
+      void supabase.storage
+        .from("diary-covers")
+        .createSignedUrl(diary.cover_path, 3600)
+        .then(({ data }) => {
+          if (active) setSrc(data?.signedUrl || "");
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [diary.cover_path]);
+  return src ? (
+    <img
+      className="diary-cover"
+      src={src}
+      alt={`Cover for ${diary.title}`}
+      loading="lazy"
+      onError={() => setSrc("")}
+    />
+  ) : (
+    <div className="diary-cover-placeholder" aria-hidden="true">
+      <BookOpen size={36} />
+    </div>
+  );
+}
+
 function Workspace({ session }: { session: Session }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [diaries, setDiaries] = useState<Diary[]>([]);
@@ -299,7 +330,10 @@ function Workspace({ session }: { session: Session }) {
   const [editingDiary, setEditingDiary] = useState<Diary | null>(null);
   const [diaryTitle, setDiaryTitle] = useState("");
   const [diaryDescription, setDiaryDescription] = useState("");
-  const [reading, setReading] = useState(false);
+  const [view, setView] = useState<"pages" | "index" | "book">("pages");
+  const [jumpPage, setJumpPage] = useState<string | null>(null);
+  const [coverPhoto, setCoverPhoto] = useState("");
+  const [removeCover, setRemoveCover] = useState(false);
   const [revision, setRevision] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
@@ -326,7 +360,7 @@ function Workspace({ session }: { session: Session }) {
         for (let offset = 0; active; offset += 200) {
           const { data, error } = await supabase
             .from("diaries")
-            .select("id,title,description,created_at")
+            .select("id,title,description,cover_path,created_at")
             .eq("user_id", session.user.id)
             .order("created_at", { ascending: false })
             .order("id")
@@ -392,44 +426,91 @@ function Workspace({ session }: { session: Session }) {
   const currentDiary = diaries.find((diary) => diary.id === activeDiaryId);
   const scopedPages = pagesInDiary(entries, currentDiary?.id || null);
   const loosePages = pagesInDiary(entries, null);
+  useEffect(() => {
+    if (view === "book" && jumpPage) {
+      const target = document.getElementById(`page-${jumpPage}`);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      target?.focus({ preventScroll: true });
+    }
+  }, [view, jumpPage]);
   function enterDiary(id: string | null) {
     setActiveDiaryId(id);
     setQuery("");
     setFilter("all");
-    setReading(false);
+    setView("pages");
+    setJumpPage(null);
     setDiaryForm(false);
     setStatus("");
   }
   function newDiary(diary: Diary | null = null) {
     setEditingDiary(diary);
     setDiaryTitle(diary?.title || "");
+    setCoverPhoto("");
+    setRemoveCover(false);
     setDiaryDescription(diary?.description || "");
     setDiaryForm(true);
     setStatus("");
+  }
+  async function chooseCover(file?: File) {
+    if (!file) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      setCoverPhoto(
+        await preparePhoto(file, {
+          maxDimension: 1200,
+          maxBase64Length: 1_000_000,
+        }),
+      );
+      setRemoveCover(false);
+    } catch (error) {
+      setStatus(message(error));
+    } finally {
+      setBusy(false);
+    }
   }
   async function saveDiary(event: FormEvent) {
     event.preventDefault();
     if (!diaryTitle.trim()) return;
     setBusy(true);
+    let uploaded: string | null = null;
+    let committed = false;
     try {
+      const id = editingDiary?.id || crypto.randomUUID();
+      const oldCover = editingDiary?.cover_path || null;
+      let coverPath = removeCover ? null : oldCover;
+      if (coverPhoto) {
+        coverPath = `${session.user.id}/${id}/${crypto.randomUUID()}.jpg`;
+        const blob = await (await fetch(coverPhoto)).blob();
+        const { error } = await supabase.storage
+          .from("diary-covers")
+          .upload(coverPath, blob, {
+            contentType: "image/jpeg",
+            upsert: false,
+          });
+        if (error) throw error;
+        uploaded = coverPath;
+      }
       const record = {
         title: diaryTitle.trim(),
         description: diaryDescription.trim(),
+        cover_path: coverPath,
       };
       const result = editingDiary
         ? await supabase
             .from("diaries")
             .update(record)
-            .eq("id", editingDiary.id)
+            .eq("id", id)
             .eq("user_id", session.user.id)
-            .select("id,title,description,created_at")
+            .select("id,title,description,cover_path,created_at")
             .single()
         : await supabase
             .from("diaries")
-            .insert({ ...record, user_id: session.user.id })
-            .select("id,title,description,created_at")
+            .insert({ ...record, id, user_id: session.user.id })
+            .select("id,title,description,cover_path,created_at")
             .single();
       if (result.error) throw result.error;
+      committed = true;
       setDiaries((old) =>
         editingDiary
           ? old.map((diary) =>
@@ -438,12 +519,33 @@ function Workspace({ session }: { session: Session }) {
           : [result.data, ...old],
       );
       setDiaryForm(false);
+      setCoverPhoto("");
       enterDiary(result.data.id);
       setStatus(
         editingDiary ? "Diary updated." : "Diary created. Add its first page.",
       );
+      if (oldCover && oldCover !== coverPath) {
+        const { error } = await supabase.storage
+          .from("diary-covers")
+          .remove([oldCover]);
+        if (error)
+          setStatus(
+            "Diary saved, but the old cover could not be removed from storage. Ask the project owner to clean it up.",
+          );
+      }
     } catch (error) {
-      setStatus(`Could not save diary: ${message(error)}`);
+      let cleanupFailed = false;
+      if (!committed && uploaded) {
+        const { error: cleanupError } = await supabase.storage
+          .from("diary-covers")
+          .remove([uploaded]);
+        cleanupFailed = Boolean(cleanupError);
+      }
+      setStatus(
+        committed
+          ? "Diary saved, but cover cleanup failed."
+          : `Could not save diary: ${message(error)}${cleanupFailed ? " Cover cleanup also failed." : ""}`,
+      );
     } finally {
       setBusy(false);
     }
@@ -463,6 +565,15 @@ function Workspace({ session }: { session: Session }) {
       setDiaries((old) => old.filter((book) => book.id !== diary.id));
       enterDiary(null);
       setStatus("Empty diary deleted.");
+      if (diary.cover_path) {
+        const { error } = await supabase.storage
+          .from("diary-covers")
+          .remove([diary.cover_path]);
+        if (error)
+          setStatus(
+            "Diary deleted, but its cover could not be removed from storage. Ask the project owner to clean it up.",
+          );
+      }
     } catch {
       setStatus(
         "Could not delete this diary. If it contains pages, move them first and reload.",
@@ -591,7 +702,8 @@ function Workspace({ session }: { session: Session }) {
       setRaw("");
       setLoaded(false);
       setActiveDiaryId(diaryId || "loose");
-      setReading(false);
+      setView("pages");
+      setJumpPage(null);
       setRevision((r) => r + 1);
       setStatus("Page saved to your archive.");
     } catch (error) {
@@ -679,7 +791,12 @@ function Workspace({ session }: { session: Session }) {
       )
       .join("\n\n--------------------\n\n");
     const url = URL.createObjectURL(
-      new Blob([content], { type: "text/plain;charset=utf-8" }),
+      new Blob(
+        [
+          `${currentDiary?.title || "Loose pages"}\n\nContents\n${scopedPages.map((entry) => `Page ${entry.page_number || "—"} · ${entry.title || "Untitled page"} · ${entry.entry_date}`).join("\n")}\n\n--------------------\n\n${content}`,
+        ],
+        { type: "text/plain;charset=utf-8" },
+      ),
     );
     const link = document.createElement("a");
     link.href = url;
@@ -723,7 +840,15 @@ function Workspace({ session }: { session: Session }) {
           </button>
         </div>
       </header>
-      <div className="intro">
+      <div
+        className={`intro ${currentDiary?.cover_path ? "intro-with-cover" : ""}`}
+      >
+        {currentDiary?.cover_path && (
+          <DiaryCover
+            key={`${currentDiary.id}:${currentDiary.cover_path}`}
+            diary={currentDiary}
+          />
+        )}
         <p className="eyebrow">
           {activeDiaryId === null
             ? "Your private collection"
@@ -825,6 +950,54 @@ function Workspace({ session }: { session: Session }) {
               placeholder="What belongs in this diary?"
             />
           </label>
+          <div className="cover-editor stack">
+            <p>Cover image (optional)</p>
+            {coverPhoto ? (
+              <img
+                className="diary-cover cover-preview"
+                src={coverPhoto}
+                alt="Selected diary cover"
+              />
+            ) : editingDiary?.cover_path && !removeCover ? (
+              <DiaryCover key={editingDiary.cover_path} diary={editingDiary} />
+            ) : (
+              <div className="diary-cover-placeholder">
+                <BookOpen size={36} />
+              </div>
+            )}
+            <label className="upload-button">
+              <Camera size={18} />{" "}
+              {coverPhoto || (editingDiary?.cover_path && !removeCover)
+                ? "Replace cover"
+                : "Choose a cover photo"}
+              <input
+                type="file"
+                accept="image/*"
+                disabled={busy}
+                onChange={(e) => {
+                  void chooseCover(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {(coverPhoto || (editingDiary?.cover_path && !removeCover)) && (
+              <button
+                type="button"
+                className="text-button danger"
+                disabled={busy}
+                onClick={() => {
+                  setCoverPhoto("");
+                  setRemoveCover(true);
+                }}
+              >
+                Remove cover
+              </button>
+            )}
+            <p className="small">
+              Covers are private to your account. They are resized before upload
+              and are not sent to Gemini.
+            </p>
+          </div>
           <div className="row">
             <button disabled={busy || !diaryTitle.trim()}>
               {busy ? "Saving…" : editingDiary ? "Save diary" : "Create diary"}
@@ -1063,7 +1236,10 @@ function Workspace({ session }: { session: Session }) {
                       disabled={busy}
                       onClick={() => enterDiary(diary.id)}
                     >
-                      <BookOpen size={28} />
+                      <DiaryCover
+                        key={`${diary.id}:${diary.cover_path || "none"}`}
+                        diary={diary}
+                      />
                       <h2>{diary.title}</h2>
                       <p>
                         {diary.description ||
@@ -1126,13 +1302,30 @@ function Workspace({ session }: { session: Session }) {
                 : "Loading your pages…"}
             </p>
             <div className="row">
-              <button
-                className="text-button"
-                disabled={!loaded || !scopedPages.length}
-                onClick={() => setReading((value) => !value)}
-              >
-                <BookOpen size={16} /> {reading ? "Page cards" : "Read as book"}
-              </button>
+              <div className="view-controls" aria-label="Diary view">
+                {(
+                  [
+                    ["pages", "Pages"],
+                    ["index", "Index"],
+                    ["book", "Read as book"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={
+                      view === value ? "view-active secondary" : "secondary"
+                    }
+                    aria-pressed={view === value}
+                    disabled={!loaded || !scopedPages.length}
+                    onClick={() => {
+                      setView(value);
+                      setJumpPage(null);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <button
                 className="text-button"
                 onClick={download}
@@ -1169,10 +1362,47 @@ function Workspace({ session }: { session: Session }) {
                 </button>
               )}
             </section>
-          ) : reading ? (
+          ) : view === "index" ? (
+            <section className="diary-index panel" aria-label="Diary index">
+              <h2>Contents</h2>
+              <p className="small">
+                Updated from your page titles and numbers. Select a page to read
+                it.
+              </p>
+              <ol>
+                {visible.map((entry) => (
+                  <li key={entry.id}>
+                    <button
+                      className="index-row"
+                      onClick={() => {
+                        setView("book");
+                        setJumpPage(entry.id);
+                      }}
+                    >
+                      <span className="index-number">
+                        Page {entry.page_number || "—"}
+                      </span>
+                      <span className="index-title">
+                        {entry.title || "Untitled page"}
+                      </span>
+                      <time dateTime={entry.entry_date}>
+                        {entry.entry_date}
+                      </time>
+                      <span aria-hidden="true">→</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : view === "book" ? (
             <section className="book-reader" aria-label="Read diary">
               {visible.map((entry) => (
-                <article key={entry.id} className="book-page">
+                <article
+                  key={entry.id}
+                  id={`page-${entry.id}`}
+                  tabIndex={-1}
+                  className="book-page"
+                >
                   <p className="eyebrow">
                     Page {entry.page_number || "—"} · {entry.entry_date}
                   </p>
