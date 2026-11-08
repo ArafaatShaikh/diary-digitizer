@@ -107,3 +107,23 @@ Open a diary (or Loose pages) and choose **Add multiple pages**. Select up to te
 Saving runs page by page, shows successful pages, and retains remaining drafts after errors. Stable row IDs prevent duplicate rows when retrying an uncertain response. Ordering, date, and numbering lock once saving starts. Back to diary verifies saved image references before removing known uploads belonging only to abandoned drafts. Drafts are held in memory: closing/reloading the browser can lose unsaved work and leave uploaded files for owner cleanup, especially after uncertain upload responses. No new migration, environment variable, or hosting service is required.
 
 The interface uses warm ivory paper, navy text, and terracotta controls.
+
+## Listen to your diary (optional audio)
+
+Before deploying, run only `supabase/migrations/202611080001_narration.sql` on an existing installation. It adds a private `diary-audio` bucket, owner/page checks, atomic daily allowances, and two-minute generation leases. It does not alter saved diary pages. New installations can use the updated `schema.sql`. Review unrelated broad storage policies: permissive policies combine with OR.
+
+Server-only Vercel environment variables:
+
+- `GEMINI_API_KEY` (or the existing `GOOGLE_API_KEY`): Google AI Studio key with access to `gemini-3.8-flash-lite-tts`. The existing image-transcription model setting is unchanged.
+- `ELEVENLABS_API_KEY`: Text-to-Speech access; use a free account for personal, non-commercial use.
+- `ELEVENLABS_VOICE_ID`: a voice available through the API on that account. Narration uses `eleven_v4_turbo`, which supports Bengali and English; verify model and voice access on the account before enabling it.
+
+Select a saved page or all pages in the current diary, confirm sending its text to Google and (on Google quota errors) ElevenLabs, then select Listen. This uses all saved pages in page order, independent of the archive search filter. Reviewed text is split into Unicode-safe sections of up to 800 code points. Each section is generated only when needed, then stored privately. Editing the text or changing the configured voice creates a new cache version. Old audio versions occupy storage until manually deleted from the private bucket. Deleting a diary page prevents new signed playback URLs for its files; existing signed links can last up to ten minutes. Remove orphaned audio from Storage as part of normal storage housekeeping.
+
+Native audio controls provide pause, seek within a section, and volume; a speed selector persists across sections. The next section loads when the current section ends. Some phones require pressing play again; test background playback and lock-screen behaviour on the actual phone. Playback progress is not persisted across reloads. Stop cancels the browser request, but an already-running provider generation may finish and consume allowance. There are no automatic retries; after failure, select Listen to restart using any saved sections.
+
+At most 10 uncached sections per account and 50 across the project per UTC day are permitted, including failed generation attempts. A Google 429 permits one ElevenLabs attempt; authentication/model/network errors do not trigger fallback. Both exhausted means stop. These are application call limits, not hard monetary caps: verify free-tier status, provider quotas, model availability, and storage limits. Saved audio is replayed without new synthesis calls. Google's `store: false` disables Interactions API conversation storage; it does not override the provider's wider data-use terms. No keys or private text are logged by the new route. Both providers process diary text; audio is not end-to-end encrypted.
+
+The UI includes ElevenLabs attribution. A provider change can change the narrator. Voice fidelity, language pronunciation, faithful rendering and account-specific quota behaviour must be tested with fictional sample text before private diary material. API tests use fake responses; no real speech generation or keys are used during development.
+
+`edge-tts` was considered as a future provider: it is a community Python client for Microsoft Edge's online speech service and does not require an API key. It is not connected by this change and would require separate Python hosting/integration; no unlimited-service guarantee is assumed.
