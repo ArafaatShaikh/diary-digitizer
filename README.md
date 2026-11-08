@@ -147,3 +147,7 @@ Apply `supabase/migrations/202611080003_narration_allowance.sql` after the narra
 The reading workspace uses a quiet header, underline navigation, compact view controls and a paper reading surface. Text to speech places Noor in a 330px side panel beside the writing on wide screens; the layout stacks below 950px and uses a single-column setup on phones. Language confirmation, processing consent, native audio playback, privacy information and page navigation remain available. The green palette is retained.
 
 Verified locally at 1280px desktop and 390px mobile widths with fictional text: no horizontal overflow, previous/next navigation, language confirmation, and consent gating. The temporary preview route and mocked detection responses were removed before the production build. Authenticated production account flows and live audio generation need device verification after deployment. No database migration is required for this interface change.
+
+## Public deployment security review
+
+See `SECURITY_REVIEW.md` for findings, verification scope and remaining dashboard checks. Apply `supabase/migrations/202611080004_storage_guard.sql` to the existing database before deploying the security hardening. Run the read-only `supabase/security-audit.sql` to inspect live RLS, bucket privacy, storage policies and quota-function permissions without returning diary contents. Public source and a public sign-in page do not require open registration; verify Supabase sign-up and abuse controls before accepting public accounts.
