@@ -95,7 +95,7 @@ export default function DiaryAudio({ pages, token }: { pages: Page[]; token: str
     {url && <audio ref={audio} controls autoPlay src={url} onLoadedMetadata={()=>{if(audio.current)audio.current.playbackRate=speed;}} onEnded={next} onError={()=>setMessage('Playback failed. Stop and reopen this section to refresh its audio link.')} />}
     <p className="small" role="status">{message}</p>
     {spokenText && <details><summary>Text being narrated</summary><div className="narration-text">{spokenText}</div></details>}
-    <details><summary>Listening limits and privacy</summary><p className="small">Up to 10 new sections per account and 50 across the app per UTC day, including failed attempts. Noor automatically selects a female voice for the detected language. A chosen language overrides detection. Background playback depends on your device. Audio may contain pronunciation errors.</p>
+    <details><summary>Listening limits and privacy</summary><p className="small">Up to 100 new sections per account and 500 across the app per UTC day, including failed attempts. Noor automatically selects a female voice for the detected language. A chosen language overrides detection. Background playback depends on your device. Audio may contain pronunciation errors.</p>
     <p className="small">Voice generation: Microsoft Edge online speech, through the community edge-tts library. No Google or ElevenLabs tokens are used for audio.</p></details>
   </section>;
 }

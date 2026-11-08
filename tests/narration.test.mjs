@@ -53,11 +53,17 @@ test('narration migration is repeatable, private and enforces quota plus generat
  insert into public.entries values('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001');
  grant select on public.entries to authenticated;`);
  const sql=readFileSync('supabase/migrations/202611080001_narration.sql','utf8');await db.exec(sql);await db.exec(sql);
+ const statusSql=readFileSync('supabase/migrations/202611080002_narration_status.sql','utf8');await db.exec(statusSql);await db.exec(statusSql);
+ const allowanceSql=readFileSync('supabase/migrations/202611080003_narration_allowance.sql','utf8');await db.exec(allowanceSql);await db.exec(allowanceSql);
  await db.exec(`set role authenticated;set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';`);
  assert.equal((await db.query(`select public.reserve_narration('page/hash/0') as ok`)).rows[0].ok,true);
  assert.equal((await db.query(`select public.reserve_narration('page/hash/0') as ok`)).rows[0].ok,false);
- for(let i=1;i<10;i++)assert.equal((await db.query(`select public.reserve_narration('page/hash/${i}') as ok`)).rows[0].ok,true);
- assert.equal((await db.query(`select public.reserve_narration('page/hash/11') as ok`)).rows[0].ok,false);
+ assert.equal((await db.query(`select public.reserve_narration_status('page/hash/0') as reason`)).rows[0].reason,'processing');
+ for(let i=1;i<100;i++)assert.equal((await db.query(`select public.reserve_narration('page/hash/${i}') as ok`)).rows[0].ok,true);
+ assert.equal((await db.query(`select public.reserve_narration('page/hash/101') as ok`)).rows[0].ok,false);
+ assert.equal((await db.query(`select public.reserve_narration_status('page/hash/102') as reason`)).rows[0].reason,'user_limit');
+ await db.exec(`reset role;update public.narration_usage set requests=500;set role authenticated;`);
+ assert.equal((await db.query(`select public.reserve_narration_status('page/hash/103') as reason`)).rows[0].reason,'app_limit');
  await db.exec(`insert into storage.objects(bucket_id,name) values('diary-audio','00000000-0000-0000-0000-000000000001/10000000-0000-0000-0000-000000000001/hash/0.audio');`);
  assert.equal((await db.query('select * from storage.objects')).rows.length,1);
  await db.exec(`set request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';`);
@@ -65,12 +71,12 @@ test('narration migration is repeatable, private and enforces quota plus generat
  await assert.rejects(()=>db.exec(`insert into storage.objects(bucket_id,name) values('diary-audio','00000000-0000-0000-0000-000000000002/10000000-0000-0000-0000-000000000001/hash/0.audio')`));
  }finally{await db.close();}
 });
-function routeFixture({owner=true,cached=false,allowed=true}={}) {
+function routeFixture({owner=true,cached=false,allowed=true,reason='user_limit'}={}) {
  const state={generated:0,reserved:0,uploaded:0};
  class RequestError extends Error {constructor(message,status=400){super(message);this.status=status;}}
  const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:owner?{id:'10000000-0000-0000-0000-000000000001',corrected_transcription:'A quiet evening beside the window with my diary.'}:null})};
  let present=cached;
- const db={from:()=>query,rpc:async()=>{state.reserved++;return {data:allowed}},storage:{from:()=>({
+ const db={from:()=>query,rpc:async()=>{state.reserved++;return {data:allowed?'reserved':reason}},storage:{from:()=>({
   createSignedUrl:async()=>present?{data:{signedUrl:'https://private.test/audio'}}:{error:'missing'},
   upload:async()=>{state.uploaded++;present=true;return {};}
  })}};
@@ -135,4 +141,14 @@ test('language selection keeps both service catalogues consistent',()=>{
  assert.equal(catalogue.length,75);
  assert.deepEqual(catalogue,JSON.parse(readFileSync('services/speech/voices.json','utf8')));
  assert.deepEqual(Array.from(narrationSegments('First paragraph.\n\nSecond paragraph.')),['First paragraph.','Second paragraph.']);
+});
+
+test('audio reservation errors distinguish processing from daily limits',async()=>{
+ for(const [reason,expected] of [['processing','already processing'],['user_limit','Your daily audio allowance'],['app_limit','app’s daily audio allowance']]){
+  const {POST,state}=routeFixture({allowed:false,reason});
+  const response=await POST(narrationRequest());
+  assert.equal(response.status,429);
+  assert.ok((await response.json()).error.includes(expected));
+  assert.equal(state.generated,0);
+ }
 });
