@@ -33,9 +33,16 @@ export async function POST(request: Request) {
     const bucket = db.storage.from('diary-audio');
     let signed = await bucket.createSignedUrl(path, 600);
     if (signed.error) {
-      const allowance = await db.rpc('reserve_narration', { p_cache_key: key });
+      const allowance = await db.rpc('reserve_narration_status', { p_cache_key: key });
       if (allowance.error) throw new RequestError('Audio setup is incomplete. Apply the narration migration.', 503);
-      if (!allowance.data) throw new RequestError('Audio allowance reached or this section is processing. Wait two minutes before retrying; daily limits reset at midnight UTC.', 429);
+      if (allowance.data !== 'reserved') {
+        const reasons: Record<string,string> = {
+          processing: 'This audio section is already processing. Wait two minutes before retrying. This has not used another section of your allowance.',
+          user_limit: 'Your daily audio allowance has been reached. New audio becomes available at midnight UTC. Previously saved audio can still be played.',
+          app_limit: 'The app’s daily audio allowance has been reached. New audio becomes available at midnight UTC. Previously saved audio can still be played.',
+        };
+        throw new RequestError(reasons[String(allowance.data)] || 'Audio could not be reserved. Please try again later.', 429);
+      }
       const result = await generateNarration(chunks[chunk], request.headers.get('authorization') || '', voice);
       const upload = await bucket.upload(path, result.bytes, { contentType: result.mime, upsert: false });
       if (upload.error) throw new RequestError('Could not save generated audio. Please try again later.', 503);

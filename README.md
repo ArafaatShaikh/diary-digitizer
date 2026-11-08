@@ -133,3 +133,7 @@ Opening a diary defaults to a forest-green, ivory-paper book reader with full sa
 “Text being narrated” displays the exact server-selected section returned alongside the private audio URL. The backend selects only `corrected_transcription`; it ignores submitted UI text and never adds titles, dates, navigation controls or page labels. Any such words already in the saved writing remain intact and can be corrected in the editor. Playback status announcements no longer repeat page titles or numbers.
 
 A reported case of narration reading “Open page” could not be reproduced against the owner's private account during development (the browser was signed out). A regression test confirms saved-content-only payloads, and the exact-text view supports verification on the affected page. No arbitrary words are stripped from private diary entries. The green layout and narrator switching were verified locally using fictional text, at desktop and mobile widths.
+
+## Narration allowance diagnostics
+
+Apply `supabase/migrations/202611080002_narration_status.sql` before deploying the updated narration API. It adds distinct reservation results for an active two-minute lease, the per-account daily cap, and the app-wide daily cap. Limits remain 10 per account and 50 app-wide; blocked reservations do not consume additional allowance. The old boolean RPC stays available for older deployments. No counters or saved audio are reset by this migration. Existing installations must run it in their Supabase SQL editor; a code deployment alone does not apply SQL migrations.
