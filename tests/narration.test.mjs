@@ -6,43 +6,35 @@ import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 const source=readFileSync('lib/narration.ts','utf8');
 const narrationModule={exports:{}};
-vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:narrationModule.exports,module:narrationModule,Buffer,AbortSignal,process,fetch});
-const {generateNarration,narrationChunks}=narrationModule.exports;
-const env={GEMINI_API_KEY:'google-test',ELEVENLABS_API_KEY:'eleven-test',ELEVENLABS_VOICE_ID:'voice-test'};
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:narrationModule.exports,module:narrationModule,Buffer,AbortSignal,process,fetch,URL});
+const {generateNarration,narrationChunks,narrationVoice}=narrationModule.exports;
+const env={SPEECH_SERVICE_URL:'http://speech.internal/'};
 test('chunking preserves Unicode and the complete reviewed text',()=>{
  const text=('বাংলা diary sentence. 🌻 '.repeat(200)).trim();
  const chunks=narrationChunks(text);
  assert.equal(chunks.join(''),text);
  assert.ok(chunks.every(s=>Array.from(s).length<=800));
 });
-test('Google success produces saved-file bytes without an ElevenLabs call',async()=>{
+test('Edge service uses the selected voice and forwards auth in one private call',async()=>{
  let calls=0;
- const result=await generateNarration('My diary',env,async(url,options)=>{
-  calls++;assert.match(url,/googleapis/);
-  const body=JSON.parse(options.body);assert.equal(body.store,false);assert.equal(body.input[0].content[0].text,'My diary');
-  return Response.json({steps:[{type:'model_output',content:[{type:'audio',mime_type:'audio/wav',data:Buffer.from('RIFF test').toString('base64')}]}]});
+ const result=await generateNarration('My diary','Bearer test','en-GB-SoniaNeural',env,async(url,options)=>{
+  calls++;assert.equal(String(url),'http://speech.internal/synthesise');
+  assert.equal(options.headers.Authorization,'Bearer test');
+  assert.equal(JSON.parse(options.body).voice,'en-GB-SoniaNeural');
+  return new Response(Buffer.from('ID3 test'),{headers:{'Content-Type':'audio/mpeg'}});
  });
- assert.equal(calls,1);assert.equal(result.mime,'audio/wav');
+ assert.equal(calls,1);assert.equal(result.mime,'audio/mpeg');
+ assert.equal(narrationVoice('English'),'en-GB-SoniaNeural');
+ assert.equal(narrationVoice('বাংলা'),'bn-BD-NabanitaNeural');
 });
-test('only Google quota errors trigger one ElevenLabs request',async()=>{
- for(const status of [400,401,403,500]) {
+test('Edge errors stop without calling paid providers or retrying',async()=>{
+ for(const status of [400,401,429,500]) {
   let calls=0;
-  await assert.rejects(()=>generateNarration('Diary',env,async()=>{calls++;return new Response('',{status});}));
+  await assert.rejects(()=>generateNarration('Diary','Bearer test','en-GB-SoniaNeural',env,async()=>{calls++;return new Response('',{status});}));
   assert.equal(calls,1);
  }
- let calls=0;
- const result=await generateNarration('Diary',env,async(url,options)=>{
-  calls++;
-  if(calls===1)return new Response('',{status:429});
-  assert.match(url,/elevenlabs/);assert.equal(options.headers['xi-api-key'],'eleven-test');
-  return new Response(Buffer.from('ID3 test'));
- });
- assert.equal(calls,2);assert.equal(result.mime,'audio/mpeg');
-});
-test('both quotas stop without retries; missing keys make no calls',async()=>{
- let calls=0;
- await assert.rejects(()=>generateNarration('Diary',env,async()=>{calls++;return new Response('',{status:429});}));assert.equal(calls,2);
- calls=0;await assert.rejects(()=>generateNarration('Diary',{},async()=>{calls++;}));assert.equal(calls,0);
+ let calls=0;await assert.rejects(()=>generateNarration('Diary','Bearer test','en-GB-SoniaNeural',{},async()=>{calls++;}));assert.equal(calls,0);
+ await assert.rejects(()=>generateNarration('Diary','Bearer test','en-GB-SoniaNeural',env,async()=>new Response('not audio')));
 });
 test('narration migration is repeatable, private and enforces quota plus generation leases',async()=>{
  const db=new PGlite();
@@ -85,7 +77,7 @@ function routeFixture({owner=true,cached=false,allowed=true}={}) {
   'node:crypto':crypto,
   '@/lib/server-auth':{requireUser:async(request)=>{if(request.headers.get('authorization')!=='Bearer valid')throw new RequestError('Sign in',401);return {db,user:{id:'owner'}};},apiError:error=>Response.json({error:error.message},{status:error.status||502})},
   '@/lib/request-validation':{RequestError,readJson:request=>request.json()},
-  '@/lib/narration':{narrationChunks, NarrationError:narrationModule.exports.NarrationError,generateNarration:async()=>{state.generated++;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
+  '@/lib/narration':{narrationChunks, narrationVoice, NarrationError:narrationModule.exports.NarrationError,generateNarration:async()=>{state.generated++;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
  };
  const routeModule={exports:{}};
  vm.runInNewContext(ts.transpileModule(readFileSync('app/api/narrate/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:routeModule.exports,module:routeModule,require:name=>adapters[name],Response,process:{env:{}}});

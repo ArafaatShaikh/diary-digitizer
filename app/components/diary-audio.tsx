@@ -53,13 +53,13 @@ export default function DiaryAudio({ pages, token }: { pages: Page[]; token: str
       <option value="all">All saved pages in this diary ({pages.length})</option>
       {pages.map((p,i)=><option key={p.id} value={p.id}>Page {p.page_number || i+1} — {p.title || 'Untitled'}</option>)}
     </select></label>
-    <label className="row"><input type="checkbox" checked={consent} disabled={busy || Boolean(url)} onChange={e=>setConsent(e.target.checked)}/><span>I agree to send the selected diary text to Google for speech generation, and to ElevenLabs if Google reports a quota limit. Generated audio is stored privately in my account.</span></label>
+    <label className="row"><input type="checkbox" checked={consent} disabled={busy || Boolean(url)} onChange={e=>setConsent(e.target.checked)}/><span>I agree to send the selected diary text to Microsoft’s online speech service for narration. Generated audio is stored privately in my account.</span></label>
     <div className="row"><button type="button" disabled={!consent || busy || !queue.length || Boolean(url)} onClick={()=>void load(0,0)}>{busy?'Preparing audio…':'Listen'}</button>
     <button type="button" className="secondary" onClick={stop}>Stop / change selection</button>
     <label>Speed<select value={speed} onChange={e=>{const rate=Number(e.target.value);setSpeed(rate);if(audio.current)audio.current.playbackRate=rate;}}>{[0.75,1,1.25,1.5].map(n=><option key={n} value={n}>{n}×</option>)}</select></label></div>
     {url && <audio ref={audio} controls autoPlay src={url} onLoadedMetadata={()=>{if(audio.current)audio.current.playbackRate=speed;}} onEnded={next} onError={()=>setMessage('Playback failed. Stop and reopen this section to refresh its audio link.')} />}
     <p className="small" role="status">{message}</p>
-    <p className="small">Up to 10 new sections per account and 50 across the app per UTC day, including failed attempts. Narrator voices may change on fallback. Background playback depends on your device. Audio may contain pronunciation errors.</p>
-    <p className="small">Voice generation: Google / <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer">ElevenLabs (elevenlabs.io)</a>. Personal, non-commercial use.</p>
+    <p className="small">Up to 10 new sections per account and 50 across the app per UTC day, including failed attempts. English narrator: Sonia, with a slower reading pace. Pages containing Bengali use Nabanita. Background playback depends on your device. Audio may contain pronunciation errors.</p>
+    <p className="small">Voice generation: Microsoft Edge online speech, through the community edge-tts library. No Google or ElevenLabs tokens are used for audio.</p>
   </section>;
 }

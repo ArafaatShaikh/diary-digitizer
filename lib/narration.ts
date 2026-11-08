@@ -17,38 +17,18 @@ export function narrationChunks(text: string): string[] {
 export class NarrationError extends Error {
   constructor(message: string, public status = 502) { super(message); }
 }
-export async function generateNarration(text: string, env = process.env, send = fetch) {
-  const googleKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
-  if (!googleKey) throw new NarrationError('Google narration is not configured.', 503);
-  const google = await send('https://generativelanguage.googleapis.com/v1beta/interactions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': googleKey },
-    signal: AbortSignal.timeout(22000),
-    body: JSON.stringify({ model: 'gemini-3.8-flash-lite-tts', store: false,
-      input: [{ type: 'user_input', content: [{ type: 'text', text,
-        annotations: [{ type: 'speech_metadata', style: 'Calm, natural audiobook narration. Read the text verbatim in its original language.' }] }] }],
-      response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice: 'Kore' }] } }),
+export function narrationVoice(text: string) {
+  return /[\u0980-\u09ff]/u.test(text) ? 'bn-BD-NabanitaNeural' : 'en-GB-SoniaNeural';
+}
+export async function generateNarration(text: string, authorization: string, voice: string, env = process.env, send = fetch) {
+  if (!env.SPEECH_SERVICE_URL) throw new NarrationError('The Edge speech service is not configured.', 503);
+  const response = await send(new URL('synthesise', env.SPEECH_SERVICE_URL.endsWith('/') ? env.SPEECH_SERVICE_URL : env.SPEECH_SERVICE_URL + '/'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: authorization },
+    signal: AbortSignal.timeout(50000), body: JSON.stringify({ text, voice }),
   });
-  if (google.status === 429) {
-    if (!env.ELEVENLABS_API_KEY || !env.ELEVENLABS_VOICE_ID)
-      throw new NarrationError('Google quota reached. ElevenLabs fallback is not configured.', 429);
-    const eleven = await send(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(env.ELEVENLABS_VOICE_ID)}?output_format=mp3_44100_128`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'xi-api-key': env.ELEVENLABS_API_KEY },
-      signal: AbortSignal.timeout(22000),
-      body: JSON.stringify({ text, model_id: 'eleven_v4_turbo' }),
-    });
-    if (!eleven.ok) throw new NarrationError('ElevenLabs could not generate audio. Check its quota, voice access and configuration.', eleven.status === 429 || eleven.status === 401 ? 429 : 502);
-    const bytes = Buffer.from(await eleven.arrayBuffer());
-    if (!bytes.length || bytes.length > 8_000_000) throw new NarrationError('Audio was empty or too large.');
-    return { bytes, mime: 'audio/mpeg' };
-  }
-  if (!google.ok) throw new NarrationError('Google narration failed. Check model access and configuration. No fallback was attempted.');
-  const data = await google.json();
-  const audio = (data.steps || []).filter((step: {type: string}) => step.type === 'model_output')
-    .flatMap((step: {content?: {type: string; data?: string; mime_type?: string}[]}) => step.content || [])
-    .filter((part: {type: string}) => part.type === 'audio');
-  if (audio.length !== 1 || !audio[0].data || !['audio/wav', 'audio/mpeg'].includes(audio[0].mime_type))
-    throw new NarrationError('Google did not return one complete supported audio file.');
-  const bytes = Buffer.from(audio[0].data, 'base64');
-  if (!bytes.length || bytes.length > 8_000_000) throw new NarrationError('Audio was empty or too large.');
-  return { bytes, mime: audio[0].mime_type as string };
+  if (!response.ok) throw new NarrationError('Edge narration is temporarily unavailable. Your saved pages are unchanged.', response.status === 429 ? 429 : 502);
+  if (!response.headers.get('content-type')?.startsWith('audio/mpeg')) throw new NarrationError('Speech service did not return MP3 audio.');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 2_000_000) throw new NarrationError('Audio was empty or too large.');
+  return { bytes, mime: 'audio/mpeg' };
 }
