@@ -112,7 +112,7 @@ The interface uses warm ivory paper, navy text, and terracotta controls.
 
 Apply `supabase/migrations/202611080001_narration.sql` before deploying on an existing database. It adds private audio storage, owner/page checks, atomic daily allowances and two-minute generation leases. Existing diary entries are unchanged. New installations can use the updated `schema.sql`. Review unrelated broad storage policies, which combine with owner policies using OR.
 
-English narration uses the user's selected `en-GB-SoniaNeural`, rate `-12%`, pitch `-2Hz`. Pages containing Bengali use `bn-BD-NabanitaNeural`. Voice selection is fixed per page so sections stay consistent. Edge TTS sends text to Microsoft's online speech service through a community Python library. It is not an offline engine or an official Azure service contract. Access, throttling and future availability are not guaranteed.
+Automatic narration uses `en-GB-SoniaNeural` for English and `bn-BD-NabanitaNeural` for pages containing Bengali. Users can explicitly choose Sonia or Ryan (`en-GB-RyanNeural`), with fictional preview MP3s provided for each. All use rate `-12%`, pitch `-2Hz`. Voice changes have separate audio cache versions. Edge TTS sends text to Microsoft's online speech service through a community Python library. It is not an offline engine or an official Azure service contract. Access, throttling and future availability are not guaranteed.
 
 No Google or ElevenLabs key is needed for narration. Image transcription still uses the existing Gemini key and model. Audio errors stop; there is no automatic retry or paid-provider fallback.
 
@@ -125,3 +125,11 @@ The player reads reviewed saved text from one selected page or all pages in the 
 Old audio versions occupy storage until removed manually. Deleting a page prevents new signed URLs, but existing links can last ten minutes; remove orphaned audio in private Storage during housekeeping. Audio storage and traffic count towards Supabase limits. No private diary text, auth tokens or provider responses are logged by the new services. The privacy model is provider processing plus private storage, not end-to-end encryption.
 
 The local evaluation with edge-tts 7.3.1 generated ten fictional English/Bengali samples successfully, including three repeat calls and a 5.5-minute long output. The user selected Sonia. This is evidence of local generation, not cloud hosting reliability or guaranteed pronunciation. Test fictional text through the deployed preview before private material.
+
+## Green book reader and narration inspection
+
+Opening a diary defaults to a forest-green, ivory-paper book reader with full saved text, previous/next page navigation, and an edit action outside the writing. Pages/cards and contents remain available. A title consisting only of “Page N” is omitted from the reading leaf; the actual saved writing is unchanged.
+
+The narrator selector is inside “Choose a voice · listen to samples”. Sample playback uses static fictional recordings, with no TTS request. Users must stop active diary playback before switching narrators. “Text being narrated” displays the exact server-selected section returned alongside the private audio URL. The backend selects only `corrected_transcription`; it ignores submitted UI text and never adds titles, dates, navigation controls or page labels. Any such words already in the saved writing remain intact and can be corrected in the editor. Playback status announcements no longer repeat page titles or numbers.
+
+A reported case of narration reading “Open page” could not be reproduced against the owner's private account during development (the browser was signed out). A regression test confirms saved-content-only payloads, and the exact-text view supports verification on the affected page. No arbitrary words are stripped from private diary entries. The green layout and narrator switching were verified locally using fictional text, at desktop and mobile widths.

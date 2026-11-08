@@ -17,6 +17,7 @@ export function narrationChunks(text: string): string[] {
 export class NarrationError extends Error {
   constructor(message: string, public status = 502) { super(message); }
 }
+export const allowedNarrators = ['en-GB-SoniaNeural', 'en-GB-RyanNeural', 'bn-BD-NabanitaNeural'];
 export function narrationVoice(text: string) {
   return /[\u0980-\u09ff]/u.test(text) ? 'bn-BD-NabanitaNeural' : 'en-GB-SoniaNeural';
 }

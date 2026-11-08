@@ -44,7 +44,7 @@ async def narrate(request: Request):
         data = json.loads(raw)
         text = data.get('text')
         voice = data.get('voice')
-        if not isinstance(text, str) or not text.strip() or len(text) > 800 or voice not in ('en-GB-SoniaNeural', 'bn-BD-NabanitaNeural'):
+        if not isinstance(text, str) or not text.strip() or len(text) > 800 or voice not in ('en-GB-SoniaNeural', 'en-GB-RyanNeural', 'bn-BD-NabanitaNeural'):
             return JSONResponse({'error': 'Invalid narration request.'}, status_code=400)
         audio = await asyncio.wait_for(synthesise(text, voice), timeout=45)
         return Response(audio, media_type='audio/mpeg', headers={'Cache-Control': 'no-store'})
