@@ -128,7 +128,7 @@ The local evaluation with edge-tts 7.3.1 generated ten fictional English/Bengali
 
 ## Green book reader and narration inspection
 
-Opening a diary defaults to a forest-green, ivory-paper book reader with full saved text, previous/next page navigation, and an edit action outside the writing. Pages/cards and contents remain available. A title consisting only of “Page N” is omitted from the reading leaf; the actual saved writing is unchanged.
+Opening a diary defaults to an ivory-paper reader with forest-green accents with full saved text, previous/next page navigation, and an edit action outside the writing. Pages/cards and contents remain available. A title consisting only of “Page N” is omitted from the reading leaf; the actual saved writing is unchanged.
 
 “Text being narrated” displays the exact server-selected section returned alongside the private audio URL. The backend selects only `corrected_transcription`; it ignores submitted UI text and never adds titles, dates, navigation controls or page labels. Any such words already in the saved writing remain intact and can be corrected in the editor. Playback status announcements no longer repeat page titles or numbers.
 
@@ -141,3 +141,9 @@ Apply `supabase/migrations/202611080002_narration_status.sql` before deploying t
 ### Increased personal narration allowance
 
 Apply `supabase/migrations/202611080003_narration_allowance.sql` after the narration migrations above. It raises the audio allowance to 100 new sections per account and 500 app-wide per UTC day, retaining existing usage, private cached audio, and processing leases. Previously saved audio still replays without using the allowance. The image transcription allowance is unchanged.
+
+## Editorial interface
+
+The reading workspace uses a quiet header, underline navigation, compact view controls and a paper reading surface. Text to speech places Noor in a 330px side panel beside the writing on wide screens; the layout stacks below 950px and uses a single-column setup on phones. Language confirmation, processing consent, native audio playback, privacy information and page navigation remain available. The green palette is retained.
+
+Verified locally at 1280px desktop and 390px mobile widths with fictional text: no horizontal overflow, previous/next navigation, language confirmation, and consent gating. The temporary preview route and mocked detection responses were removed before the production build. Authenticated production account flows and live audio generation need device verification after deployment. No database migration is required for this interface change.
