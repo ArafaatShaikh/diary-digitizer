@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "diary": {
+      "root": ".",
+      "framework": "nextjs",
+      "bindings": [{ "type": "service", "service": "speech", "format": "url", "env": "SPEECH_SERVICE_URL" }]
+    },
+    "speech": {
+      "root": "services/speech",
+      "framework": "fastapi",
+      "entrypoint": "main:app"
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": { "service": "diary" } }]
+}

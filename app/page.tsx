@@ -16,6 +16,7 @@ import {
 import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
 import Lists from "./components/lists";
+import DiaryAudio from "./components/diary-audio";
 import BatchPages from "./components/batch-pages";
 import { requestedListId } from "@/lib/list-calendar";
 import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
@@ -1442,6 +1443,7 @@ function Workspace({ session }: { session: Session }) {
                   </button>
                 </div>
               </div>
+              {loaded && scopedPages.length > 0 && <DiaryAudio key={currentDiary?.id || "loose"} pages={scopedPages} token={session.access_token} />}
               {!loaded ? (
                 <button
                   className="secondary"
