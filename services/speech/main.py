@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 import edge_tts
 import httpx
 from fastapi import FastAPI, Request
@@ -9,6 +10,7 @@ from fastapi.responses import Response, JSONResponse
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 MAX_BYTES = 2_000_000
+ALLOWED_VOICES = frozenset(item['voice'] for item in json.loads(Path(__file__).with_name('voices.json').read_text()))
 
 async def synthesise(text: str, voice: str) -> bytes:
     audio = bytearray()
@@ -44,7 +46,7 @@ async def narrate(request: Request):
         data = json.loads(raw)
         text = data.get('text')
         voice = data.get('voice')
-        if not isinstance(text, str) or not text.strip() or len(text) > 800 or voice not in ('en-GB-SoniaNeural', 'en-GB-RyanNeural', 'bn-BD-NabanitaNeural'):
+        if not isinstance(text, str) or not text.strip() or len(text) > 800 or voice not in ALLOWED_VOICES:
             return JSONResponse({'error': 'Invalid narration request.'}, status_code=400)
         audio = await asyncio.wait_for(synthesise(text, voice), timeout=45)
         return Response(audio, media_type='audio/mpeg', headers={'Cache-Control': 'no-store'})

@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
 import ts from 'typescript';
 import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 const source=readFileSync('lib/narration.ts','utf8');
 const narrationModule={exports:{}};
-vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:narrationModule.exports,module:narrationModule,Buffer,AbortSignal,process,fetch,URL});
-const {generateNarration,narrationChunks,narrationVoice}=narrationModule.exports;
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:narrationModule.exports,module:narrationModule,Buffer,AbortSignal,process,fetch,URL,require:name=>name==='./voice-catalogue.json'?{default:JSON.parse(readFileSync('lib/voice-catalogue.json','utf8'))}:require(name)});
+const {generateNarration,narrationChunks,narrationVoice,narrationSegments,detectNarration}=narrationModule.exports;
 const env={SPEECH_SERVICE_URL:'http://speech.internal/'};
 test('chunking preserves Unicode and the complete reviewed text',()=>{
  const text=('বাংলা diary sentence. 🌻 '.repeat(200)).trim();
@@ -24,8 +26,8 @@ test('Edge service uses the selected voice and forwards auth in one private call
   return new Response(Buffer.from('ID3 test'),{headers:{'Content-Type':'audio/mpeg'}});
  });
  assert.equal(calls,1);assert.equal(result.mime,'audio/mpeg');
- assert.equal(narrationVoice('English'),'en-GB-SoniaNeural');
- assert.equal(narrationVoice('বাংলা'),'bn-BD-NabanitaNeural');
+ assert.equal(narrationVoice('A quiet evening beside the window with my diary.'),'en-GB-SoniaNeural');
+ assert.equal(narrationVoice('Hello'),null);
 });
 test('Edge errors stop without calling paid providers or retrying',async()=>{
  for(const status of [400,401,429,500]) {
@@ -66,7 +68,7 @@ test('narration migration is repeatable, private and enforces quota plus generat
 function routeFixture({owner=true,cached=false,allowed=true}={}) {
  const state={generated:0,reserved:0,uploaded:0};
  class RequestError extends Error {constructor(message,status=400){super(message);this.status=status;}}
- const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:owner?{id:'10000000-0000-0000-0000-000000000001',corrected_transcription:'Reviewed diary'}:null})};
+ const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:owner?{id:'10000000-0000-0000-0000-000000000001',corrected_transcription:'A quiet evening beside the window with my diary.'}:null})};
  let present=cached;
  const db={from:()=>query,rpc:async()=>{state.reserved++;return {data:allowed}},storage:{from:()=>({
   createSignedUrl:async()=>present?{data:{signedUrl:'https://private.test/audio'}}:{error:'missing'},
@@ -77,7 +79,7 @@ function routeFixture({owner=true,cached=false,allowed=true}={}) {
   'node:crypto':crypto,
   '@/lib/server-auth':{requireUser:async(request)=>{if(request.headers.get('authorization')!=='Bearer valid')throw new RequestError('Sign in',401);return {db,user:{id:'owner'}};},apiError:error=>Response.json({error:error.message},{status:error.status||502})},
   '@/lib/request-validation':{RequestError,readJson:request=>request.json()},
-  '@/lib/narration':{narrationChunks, narrationVoice, allowedNarrators:narrationModule.exports.allowedNarrators, NarrationError:narrationModule.exports.NarrationError,generateNarration:async(text,auth,voice)=>{state.generated++;state.generatedText=text;state.voice=voice;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
+  '@/lib/narration':{narrationChunks, narrationSegments, detectNarration, narrationVoice, allowedNarrators:narrationModule.exports.allowedNarrators, NarrationError:narrationModule.exports.NarrationError,generateNarration:async(text,auth,voice)=>{state.generated++;state.generatedText=text;state.voice=voice;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
  };
  const routeModule={exports:{}};
  vm.runInNewContext(ts.transpileModule(readFileSync('app/api/narrate/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:routeModule.exports,module:routeModule,require:name=>adapters[name],Response,process:{env:{}}});
@@ -85,7 +87,7 @@ function routeFixture({owner=true,cached=false,allowed=true}={}) {
 }
 const awaitCrypto=await import('node:crypto');
 function narrationRequest(token='valid',overrides={}) {
- return new Request('https://diary.test/api/narrate',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify({entryId:'10000000-0000-0000-0000-000000000001',chunk:0,consent:true,textHash:awaitCrypto.createHash('sha256').update('Reviewed diary').digest('hex'),...overrides})});
+ return new Request('https://diary.test/api/narrate',{method:'POST',headers:{Authorization:`Bearer ${token}`},body:JSON.stringify({entryId:'10000000-0000-0000-0000-000000000001',chunk:0,consent:true,textHash:awaitCrypto.createHash('sha256').update('A quiet evening beside the window with my diary.').digest('hex'),...overrides})});
 }
 test('narration route authenticates and rejects inaccessible, stale or unconfirmed pages before spending quota',async()=>{
  for(const [options,token,body,status] of [[{},'invalid',{},401],[{owner:false},'valid',{},404],[{},'valid',{consent:false},400],[{},'valid',{textHash:'old'},409],[{},'valid',{chunk:99},400]]) {
@@ -108,11 +110,29 @@ test('cached playback spends no quota, uncached audio is reserved and saved once
 
 test('spoken payload contains saved writing only and honours the selected narrator',async()=>{
  const {POST,state}=routeFixture();
- const response=await POST(narrationRequest('valid',{voice:'en-GB-RyanNeural',text:'PAGE 1 Open page Next page'}));
+ const response=await POST(narrationRequest('valid',{language:'ur',text:'PAGE 1 Open page Next page'}));
  assert.equal(response.status,200);
- assert.equal(state.generatedText,'Reviewed diary');
- assert.equal(state.voice,'en-GB-RyanNeural');
- const data=await response.json();assert.equal(data.text,'Reviewed diary');
+ assert.equal(state.generatedText,'A quiet evening beside the window with my diary.');
+ assert.equal(state.voice,'ur-PK-UzmaNeural');
+ const data=await response.json();assert.equal(data.text,'A quiet evening beside the window with my diary.');
  assert.ok(!data.text.includes('Open page'));
- const invalid=routeFixture();assert.equal((await invalid.POST(narrationRequest('valid',{voice:'unknown'}))).status,400);assert.equal(invalid.state.generated,0);
+ const invalid=routeFixture();assert.equal((await invalid.POST(narrationRequest('valid',{language:'unknown'}))).status,422);assert.equal(invalid.state.generated,0);
+});
+
+test('detection preview requires ownership and never generates speech or reserves quota',async()=>{
+ const {POST,state}=routeFixture();
+ const response=await POST(narrationRequest('valid',{action:'detect',consent:false}));
+ assert.equal(response.status,200);
+ assert.equal((await response.json()).sections[0].language,'en');
+ assert.equal(state.generated,0);assert.equal(state.reserved,0);
+ const other=routeFixture({owner:false});
+ assert.equal((await other.POST(narrationRequest('valid',{action:'detect'}))).status,404);
+});
+test('language selection keeps both service catalogues consistent',()=>{
+ assert.equal(detectNarration('Hello'),null);
+ assert.equal(detectNarration('Hello','ar').voice,'ar-SA-ZariyahNeural');
+ const catalogue=JSON.parse(readFileSync('lib/voice-catalogue.json','utf8'));
+ assert.equal(catalogue.length,75);
+ assert.deepEqual(catalogue,JSON.parse(readFileSync('services/speech/voices.json','utf8')));
+ assert.deepEqual(Array.from(narrationSegments('First paragraph.\n\nSecond paragraph.')),['First paragraph.','Second paragraph.']);
 });

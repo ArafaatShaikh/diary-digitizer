@@ -326,7 +326,7 @@ function DiaryCover({ diary }: { diary: Diary }) {
 }
 
 function Workspace({ session }: { session: Session }) {
-  const [area, setArea] = useState<"diaries" | "lists">(() =>
+  const [area, setArea] = useState<"diaries" | "speech" | "lists">(() =>
     typeof window !== "undefined" && requestedListId(window.location.search)
       ? "lists"
       : "diaries",
@@ -867,7 +867,8 @@ function Workspace({ session }: { session: Session }) {
       <nav className="workspace-tabs" aria-label="Your collection">
         {(
           [
-            ["diaries", "Diaries"],
+            ["diaries", "Image to text"],
+            ["speech", "Text to speech"],
             ["lists", "Lists"],
           ] as const
         ).map(([value, label]) => (
@@ -892,7 +893,7 @@ function Workspace({ session }: { session: Session }) {
               setCoverPhoto("");
               setListDirty(false);
               setListBusy(false);
-              if (value === "diaries") {
+              if (value !== "lists") {
                 const address = new URL(window.location.href);
                 address.searchParams.delete("list");
                 window.history.replaceState(null, "", address.href);
@@ -922,8 +923,8 @@ function Workspace({ session }: { session: Session }) {
               />
             )}
             <p className="eyebrow">
-              {activeDiaryId === null
-                ? "Your private collection"
+              {area === "speech" ? "Text to speech · Noor" : activeDiaryId === null
+                ? "Image to text · Your private collection"
                 : "Your handwritten pages"}
             </p>
             <h1>
@@ -1367,7 +1368,7 @@ function Workspace({ session }: { session: Session }) {
             </section>
           ) : (
             <>
-              <div className="toolbar">
+              {area !== "speech" && <div className="toolbar">
                 <label className="search">
                   <Search size={18} />
                   <input
@@ -1402,7 +1403,7 @@ function Workspace({ session }: { session: Session }) {
                 <button onClick={() => open(null)} disabled={busy || !loaded}>
                   <Plus size={18} /> Add a page
                 </button>
-              </div>
+              </div>}
               <div className="row spread">
                 <p className="small">
                   {loaded
@@ -1444,7 +1445,7 @@ function Workspace({ session }: { session: Session }) {
                   </button>
                 </div>
               </div>
-              {loaded && scopedPages.length > 0 && <DiaryAudio key={currentDiary?.id || "loose"} pages={scopedPages} token={session.access_token} />}
+              {area === "speech" && loaded && scopedPages.length > 0 && <DiaryAudio key={currentDiary?.id || "loose"} pages={scopedPages} token={session.access_token} />}
               {!loaded ? (
                 <button
                   className="secondary"
