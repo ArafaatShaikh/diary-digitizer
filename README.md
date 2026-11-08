@@ -141,3 +141,7 @@ Apply `supabase/migrations/202611080002_narration_status.sql` before deploying t
 ### Increased personal narration allowance
 
 Apply `supabase/migrations/202611080003_narration_allowance.sql` after the narration migrations above. It raises the audio allowance to 100 new sections per account and 500 app-wide per UTC day, retaining existing usage, private cached audio, and processing leases. Previously saved audio still replays without using the allowance. The image transcription allowance is unchanged.
+
+## Public deployment security review
+
+See `SECURITY_REVIEW.md` for findings, verification scope and remaining dashboard checks. Apply `supabase/migrations/202611080004_storage_guard.sql` to the existing database before deploying the security hardening. Run the read-only `supabase/security-audit.sql` to inspect live RLS, bucket privacy, storage policies and quota-function permissions without returning diary contents. Public source and a public sign-in page do not require open registration; verify Supabase sign-up and abuse controls before accepting public accounts.
