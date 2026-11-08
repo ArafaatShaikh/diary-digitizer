@@ -77,7 +77,7 @@ function routeFixture({owner=true,cached=false,allowed=true}={}) {
   'node:crypto':crypto,
   '@/lib/server-auth':{requireUser:async(request)=>{if(request.headers.get('authorization')!=='Bearer valid')throw new RequestError('Sign in',401);return {db,user:{id:'owner'}};},apiError:error=>Response.json({error:error.message},{status:error.status||502})},
   '@/lib/request-validation':{RequestError,readJson:request=>request.json()},
-  '@/lib/narration':{narrationChunks, narrationVoice, NarrationError:narrationModule.exports.NarrationError,generateNarration:async()=>{state.generated++;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
+  '@/lib/narration':{narrationChunks, narrationVoice, allowedNarrators:narrationModule.exports.allowedNarrators, NarrationError:narrationModule.exports.NarrationError,generateNarration:async(text,auth,voice)=>{state.generated++;state.generatedText=text;state.voice=voice;return {bytes:Buffer.from('audio'),mime:'audio/mpeg'}}},
  };
  const routeModule={exports:{}};
  vm.runInNewContext(ts.transpileModule(readFileSync('app/api/narrate/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:routeModule.exports,module:routeModule,require:name=>adapters[name],Response,process:{env:{}}});
@@ -104,4 +104,15 @@ test('cached playback spends no quota, uncached audio is reserved and saved once
  }
  const {POST,state}=routeFixture({allowed:false});
  assert.equal((await POST(narrationRequest())).status,429);assert.equal(state.generated,0);
+});
+
+test('spoken payload contains saved writing only and honours the selected narrator',async()=>{
+ const {POST,state}=routeFixture();
+ const response=await POST(narrationRequest('valid',{voice:'en-GB-RyanNeural',text:'PAGE 1 Open page Next page'}));
+ assert.equal(response.status,200);
+ assert.equal(state.generatedText,'Reviewed diary');
+ assert.equal(state.voice,'en-GB-RyanNeural');
+ const data=await response.json();assert.equal(data.text,'Reviewed diary');
+ assert.ok(!data.text.includes('Open page'));
+ const invalid=routeFixture();assert.equal((await invalid.POST(narrationRequest('valid',{voice:'unknown'}))).status,400);assert.equal(invalid.state.generated,0);
 });

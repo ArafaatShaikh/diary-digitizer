@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { requireUser, apiError } from '@/lib/server-auth';
 import { readJson, RequestError } from '@/lib/request-validation';
-import { narrationChunks, generateNarration, narrationVoice, NarrationError } from '@/lib/narration';
+import { narrationChunks, generateNarration, narrationVoice, allowedNarrators, NarrationError } from '@/lib/narration';
 export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
@@ -19,7 +19,8 @@ export async function POST(request: Request) {
     const chunks = narrationChunks(text);
     const chunk = Number(body.chunk);
     if (chunk >= chunks.length) throw new RequestError('This audio section does not exist.');
-    const voice = narrationVoice(text);
+    if (body.voice !== undefined && body.voice !== 'auto' && (typeof body.voice !== 'string' || !allowedNarrators.includes(body.voice))) throw new RequestError('Choose an available narrator.');
+    const voice = typeof body.voice === 'string' && body.voice !== 'auto' ? body.voice : narrationVoice(text);
     const version = createHash('sha256').update(`edge-v1:${hash}:${voice}:-12%:-2Hz`).digest('hex');
     const key = `${entry.id}/${version}/${chunk}`;
     const path = `${user.id}/${key}.audio`;
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       signed = await bucket.createSignedUrl(path, 600);
     }
     if (signed.error || !signed.data) throw new RequestError('Could not open saved audio.', 503);
-    return Response.json({ url: signed.data.signedUrl, chunks: chunks.length }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ url: signed.data.signedUrl, chunks: chunks.length, text: chunks[chunk], voice }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof NarrationError) return Response.json({error:error.message},{status:error.status,headers:{'Cache-Control':'no-store'}});
     if (error instanceof RequestError) return apiError(error);

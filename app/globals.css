@@ -1,11 +1,11 @@
 @import "tailwindcss";
 :root {
   color-scheme: light;
-  --ink: #253348;
-  --paper: #faf7f2;
-  --muted: #646875;
-  --accent: #923f2b;
-  --line: #e2d9cf;
+  --ink: #213b2d;
+  --paper: #f1f3eb;
+  --muted: #59675b;
+  --accent: #28523e;
+  --line: #cbd4c5;
 }
 * {
   box-sizing: border-box;
@@ -139,7 +139,7 @@ textarea {
   display: inline-flex;
   border-radius: 14px;
   padding: 16px;
-  background: #f3e2d7;
+  background: #e0e9da;
   color: var(--accent);
   margin-bottom: 22px;
 }
@@ -454,7 +454,7 @@ footer {
   width: 100%;
   height: 175px;
   border-radius: 7px;
-  background: #f3e2d7;
+  background: #e0e9da;
   color: var(--accent);
   display: flex;
   align-items: center;
@@ -741,3 +741,15 @@ footer {
 }
 
 .diary-audio{margin:1rem 0}.diary-audio audio{width:100%;margin-top:1rem}.diary-audio label{display:block;margin:1rem 0}.diary-audio label.row{display:flex;align-items:flex-start;gap:.7rem}.diary-audio input[type="checkbox"]{width:1.2rem;min-width:1.2rem;margin-top:.3rem}.diary-audio select{display:block;max-width:100%;margin-top:.4rem;padding:.5rem}.diary-audio .row{flex-wrap:wrap}
+
+/* A reading surface, with controls kept outside the writing. */
+.reading-room{max-width:850px;margin:30px auto 45px;border-radius:14px;background:#244634;padding:12px;box-shadow:0 18px 45px #213b2d20}
+.book-cover-strip{position:relative;padding:20px 32px;color:#f4f2df;border-bottom:1px solid #80927a50}.book-cover-strip .eyebrow{color:#c7d6b3;font-size:10px;letter-spacing:2px}.book-cover-strip h2{font-size:27px;margin:7px 40px 0 0}.book-flower{position:absolute;right:32px;top:30px;color:#c8dcac;font-size:28px}
+.reading-leaf{position:relative;min-height:540px;margin:0;background:linear-gradient(90deg,#e4dfce 0,#f8f5e9 22px,#fffdf4 60px);padding:32px clamp(28px,7vw,80px) 65px;border-radius:2px 2px 9px 2px;box-shadow:inset -4px 0 #dedbc8,5px 5px #d2d4bc,8px 8px #aebd9e}
+.reading-leaf h2{font-size:clamp(27px,4vw,36px);margin:36px 0 27px;color:#28442f}.leaf-running-head{display:flex;justify-content:space-between;gap:15px;border-bottom:1px solid #dfdfcd;padding-bottom:13px;font:10px/1.6 Arial,sans-serif;letter-spacing:1px;text-transform:uppercase;color:#6c785f}.reading-leaf .book-text{font-size:clamp(18px,2.3vw,21px);line-height:1.95;color:#303c2f;margin-top:26px}.leaf-number{position:absolute;bottom:22px;left:50%;color:#7e866e;font:italic 15px Georgia,serif}
+.book-turns{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:24px 12px 8px;color:#e4ecd6}.book-turns button.secondary{color:#edf3df;border-color:#6f8464;background:transparent}.book-turns span{font:12px monospace;color:#cbd8bc}.book-edit{display:block;margin:7px auto 2px;color:#d8e6c6;font-size:12px}
+.diary-card{background:#f9faf3;box-shadow:inset 5px 0 #2b533d}.diary-cover-placeholder{background:linear-gradient(125deg,#315b43,#1b3b2c);color:#dbe5bb;border:1px solid #607554;box-shadow:inset 7px 0 #153626,2px 3px #c9d3bd}.view-active.secondary{background:var(--accent);color:#fff}.diary-audio{border-color:#b7c9ae;background:#fafcf5}.audio-edition{display:flex;align-items:center;justify-content:space-between;gap:15px}.audio-edition .eyebrow{font-size:10px;letter-spacing:2px;color:#526e47}.narrator-badge{padding:5px 12px;border:1px solid #b8cbaa;border-radius:20px;color:#3d5b34;font-size:11px;white-space:nowrap}.diary-audio details{margin-top:15px;color:var(--muted);font-size:13px}.diary-audio summary{cursor:pointer;padding:5px 0}.narration-text{white-space:pre-wrap;font:16px/1.8 Georgia,serif;max-height:240px;overflow:auto;border-left:2px solid #829d69;padding-left:16px}.narration-note{color:#425e37}
+@media(max-width:600px){.reading-room{margin:20px -8px;padding:8px;border-radius:10px}.reading-leaf{min-height:470px;padding:23px 25px 60px;background:#fffdf4}.book-cover-strip{padding:18px}.book-cover-strip h2{font-size:23px}.book-flower{right:18px;top:22px}.leaf-running-head{font-size:9px}.reading-leaf .book-text{line-height:1.85}.book-turns{padding:20px 5px 6px}.book-turns button{padding:8px 13px;font-size:13px}.audio-edition{align-items:flex-start}.narrator-badge{font-size:10px;padding:4px 8px}}
+.book-cover-strip{display:block}.diary-audio .audio-edition{padding:0 0 14px;margin:0 0 14px;border-bottom:1px solid #d3ddcb}.audio-edition h2{margin:4px 0 0}.diary-audio label.row{flex-wrap:nowrap}.diary-audio .row>label{margin:0}.diary-audio{padding:22px}.narrator-badge{background:#eaf0df}
+
+.diary-audio .audio-consent{display:flex;align-items:flex-start;gap:12px}.audio-consent input{flex:0 0 18px}.audio-consent span{font-weight:400}

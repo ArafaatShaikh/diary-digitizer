@@ -17,6 +17,7 @@ import { isConfigured, supabase } from "@/lib/supabase";
 import { preparePhoto } from "@/lib/photo";
 import Lists from "./components/lists";
 import DiaryAudio from "./components/diary-audio";
+import BookReader from "./components/book-reader";
 import BatchPages from "./components/batch-pages";
 import { requestedListId } from "@/lib/list-calendar";
 import { pagesInDiary, nextPageNumber, type Diary } from "@/lib/diaries";
@@ -342,7 +343,7 @@ function Workspace({ session }: { session: Session }) {
   const [editingDiary, setEditingDiary] = useState<Diary | null>(null);
   const [diaryTitle, setDiaryTitle] = useState("");
   const [diaryDescription, setDiaryDescription] = useState("");
-  const [view, setView] = useState<"pages" | "index" | "book">("pages");
+  const [view, setView] = useState<"pages" | "index" | "book">("book");
   const [jumpPage, setJumpPage] = useState<string | null>(null);
   const [coverPhoto, setCoverPhoto] = useState("");
   const [removeCover, setRemoveCover] = useState(false);
@@ -450,7 +451,7 @@ function Workspace({ session }: { session: Session }) {
     setActiveDiaryId(id);
     setQuery("");
     setFilter("all");
-    setView("pages");
+    setView("book");
     setJumpPage(null);
     setDiaryForm(false);
     setStatus("");
@@ -715,7 +716,7 @@ function Workspace({ session }: { session: Session }) {
       setRaw("");
       setLoaded(false);
       setActiveDiaryId(diaryId || "loose");
-      setView("pages");
+      setView("book");
       setJumpPage(null);
       setRevision((r) => r + 1);
       setStatus("Page saved to your archive.");
@@ -1103,7 +1104,7 @@ function Workspace({ session }: { session: Session }) {
               }}
               onClose={() => {
                 setBatch(false);
-                setView("pages");
+                setView("book");
                 setRevision((r) => r + 1);
               }}
             />
@@ -1503,30 +1504,7 @@ function Workspace({ session }: { session: Session }) {
                   </ol>
                 </section>
               ) : view === "book" ? (
-                <section className="book-reader" aria-label="Read diary">
-                  {visible.map((entry) => (
-                    <article
-                      key={entry.id}
-                      id={`page-${entry.id}`}
-                      tabIndex={-1}
-                      className="book-page"
-                    >
-                      <p className="eyebrow">
-                        Page {entry.page_number || "—"} · {entry.entry_date}
-                      </p>
-                      <h2>{entry.title || "Untitled page"}</h2>
-                      <p className="book-text">
-                        {entry.corrected_transcription}
-                      </p>
-                      <button
-                        className="text-button"
-                        onClick={() => open(entry)}
-                      >
-                        Edit page {entry.page_number || ""} →
-                      </button>
-                    </article>
-                  ))}
-                </section>
+                <BookReader key={`${activeDiaryId}:${jumpPage || ''}:${query}:${filter}`} pages={visible} title={currentDiary?.title || 'Loose pages'} initialPage={jumpPage} onEdit={(page)=>open(entries.find(entry=>entry.id===page.id) || null)} />
               ) : (
                 <div className="cards">
                   {visible.map((entry) => (
