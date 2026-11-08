@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./reading-layout.css";
 export const metadata: Metadata = {
   title: "Paper, kept close — Diary Digitizer",
   description:

@@ -827,11 +827,17 @@ function Workspace({ session }: { session: Session }) {
   );
   return (
     <main className="workspace">
-      <header>
+      <header className="workspace-header">
         <div className="brand">
-          <BookOpen size={26} /> Paper, kept close
+          <span className="brand-symbol">
+            <BookOpen size={22} />
+          </span>
+          <span>
+            Paper<span className="brand-caption">kept close</span>
+          </span>
         </div>
         <div className="header-actions">
+          <span className="account-email">{session.user.email}</span>
           {area === "diaries" && (
             <button
               className="secondary"
@@ -923,9 +929,11 @@ function Workspace({ session }: { session: Session }) {
               />
             )}
             <p className="eyebrow">
-              {area === "speech" ? "Text to speech · Noor" : activeDiaryId === null
-                ? "Image to text · Your private collection"
-                : "Your handwritten pages"}
+              {area === "speech"
+                ? "Text to speech · Noor"
+                : activeDiaryId === null
+                  ? "Image to text · Your private collection"
+                  : "Your handwritten pages"}
             </p>
             <h1>
               {currentDiary?.title ||
@@ -939,7 +947,6 @@ function Workspace({ session }: { session: Session }) {
                   ? "Pages waiting for a diary. Open a page to file it."
                   : "A diary for every notebook, year, or part of your life.")}
             </p>
-            <p className="small">Signed in as {session.user.email}</p>
           </div>
           {status && (
             <p className="notice" role="status">
@@ -1319,7 +1326,10 @@ function Workspace({ session }: { session: Session }) {
                         Keep all the pages of a notebook together. You can
                         create as many diaries as you need.
                       </p>
-                      <button disabled={busy || batch} onClick={() => newDiary()}>
+                      <button
+                        disabled={busy || batch}
+                        onClick={() => newDiary()}
+                      >
                         <Plus size={18} /> Create a diary
                       </button>
                     </div>
@@ -1368,43 +1378,45 @@ function Workspace({ session }: { session: Session }) {
             </section>
           ) : (
             <>
-              {area !== "speech" && <div className="toolbar">
-                <label className="search">
-                  <Search size={18} />
-                  <input
-                    aria-label="Search this diary"
-                    placeholder="Search titles, words, or dates"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </label>
-                <select
-                  aria-label="Filter by type"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                >
-                  <option value="all">All pages</option>
-                  {kinds.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setBatch(true);
-                    setStatus("");
-                  }}
-                  disabled={busy || !loaded}
-                >
-                  Add multiple pages
-                </button>
-                <button onClick={() => open(null)} disabled={busy || !loaded}>
-                  <Plus size={18} /> Add a page
-                </button>
-              </div>}
-              <div className="row spread">
+              {area !== "speech" && (
+                <div className="toolbar">
+                  <label className="search">
+                    <Search size={18} />
+                    <input
+                      aria-label="Search this diary"
+                      placeholder="Search titles, words, or dates"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </label>
+                  <select
+                    aria-label="Filter by type"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  >
+                    <option value="all">All pages</option>
+                    {kinds.map((k) => (
+                      <option key={k.value} value={k.value}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      setBatch(true);
+                      setStatus("");
+                    }}
+                    disabled={busy || !loaded}
+                  >
+                    Add multiple pages
+                  </button>
+                  <button onClick={() => open(null)} disabled={busy || !loaded}>
+                    <Plus size={18} /> Add a page
+                  </button>
+                </div>
+              )}
+              <div className="row spread collection-controls">
                 <p className="small">
                   {loaded
                     ? `${scopedPages.length} saved ${scopedPages.length === 1 ? "page" : "pages"}`
@@ -1416,7 +1428,7 @@ function Workspace({ session }: { session: Session }) {
                       [
                         ["pages", "Pages"],
                         ["index", "Index"],
-                        ["book", "Read as book"],
+                        ["book", "Read"],
                       ] as const
                     ).map(([value, label]) => (
                       <button
@@ -1445,89 +1457,116 @@ function Workspace({ session }: { session: Session }) {
                   </button>
                 </div>
               </div>
-              {area === "speech" && loaded && scopedPages.length > 0 && <DiaryAudio key={currentDiary?.id || "loose"} pages={scopedPages} token={session.access_token} />}
-              {!loaded ? (
-                <button
-                  className="secondary"
-                  onClick={() => setRevision((r) => r + 1)}
-                >
-                  Reload pages
-                </button>
-              ) : !visible.length ? (
-                <section className="empty">
-                  <BookOpen size={42} />
-                  <h2>
-                    {scopedPages.length
-                      ? "No matching pages"
-                      : "Your first page starts here."}
-                  </h2>
-                  <p>
-                    {scopedPages.length
-                      ? "Try a different search or type."
-                      : "Take a photo of your notebook, review the words, and save."}
-                  </p>
-                  {!scopedPages.length && (
-                    <button onClick={() => open(null)}>
-                      <Camera size={18} /> Add your first page
-                    </button>
-                  )}
-                </section>
-              ) : view === "index" ? (
-                <section className="diary-index panel" aria-label="Diary index">
-                  <h2>Contents</h2>
-                  <p className="small">
-                    Updated from your page titles and numbers. Select a page to
-                    read it.
-                  </p>
-                  <ol>
+              <div
+                className={
+                  area === "speech" && loaded && scopedPages.length > 0
+                    ? "listening-layout"
+                    : ""
+                }
+              >
+                {area === "speech" && loaded && scopedPages.length > 0 && (
+                  <DiaryAudio
+                    key={currentDiary?.id || "loose"}
+                    pages={scopedPages}
+                    token={session.access_token}
+                  />
+                )}
+                {!loaded ? (
+                  <button
+                    className="secondary"
+                    onClick={() => setRevision((r) => r + 1)}
+                  >
+                    Reload pages
+                  </button>
+                ) : !visible.length ? (
+                  <section className="empty">
+                    <BookOpen size={42} />
+                    <h2>
+                      {scopedPages.length
+                        ? "No matching pages"
+                        : "Your first page starts here."}
+                    </h2>
+                    <p>
+                      {scopedPages.length
+                        ? "Try a different search or type."
+                        : "Take a photo of your notebook, review the words, and save."}
+                    </p>
+                    {!scopedPages.length && (
+                      <button onClick={() => open(null)}>
+                        <Camera size={18} /> Add your first page
+                      </button>
+                    )}
+                  </section>
+                ) : view === "index" ? (
+                  <section
+                    className="diary-index panel"
+                    aria-label="Diary index"
+                  >
+                    <h2>Contents</h2>
+                    <p className="small">
+                      Updated from your page titles and numbers. Select a page
+                      to read it.
+                    </p>
+                    <ol>
+                      {visible.map((entry) => (
+                        <li key={entry.id}>
+                          <button
+                            className="index-row"
+                            onClick={() => {
+                              setView("book");
+                              setJumpPage(entry.id);
+                            }}
+                          >
+                            <span className="index-number">
+                              Page {entry.page_number || "—"}
+                            </span>
+                            <span className="index-title">
+                              {entry.title || "Untitled page"}
+                            </span>
+                            <time dateTime={entry.entry_date}>
+                              {entry.entry_date}
+                            </time>
+                            <span aria-hidden="true">→</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                ) : view === "book" ? (
+                  <BookReader
+                    key={`${activeDiaryId}:${jumpPage || ""}:${query}:${filter}`}
+                    pages={visible}
+                    title={currentDiary?.title || "Loose pages"}
+                    initialPage={jumpPage}
+                    onEdit={(page) =>
+                      open(
+                        entries.find((entry) => entry.id === page.id) || null,
+                      )
+                    }
+                  />
+                ) : (
+                  <div className="cards">
                     {visible.map((entry) => (
-                      <li key={entry.id}>
-                        <button
-                          className="index-row"
-                          onClick={() => {
-                            setView("book");
-                            setJumpPage(entry.id);
-                          }}
-                        >
-                          <span className="index-number">
-                            Page {entry.page_number || "—"}
-                          </span>
-                          <span className="index-title">
-                            {entry.title || "Untitled page"}
-                          </span>
-                          <time dateTime={entry.entry_date}>
-                            {entry.entry_date}
-                          </time>
-                          <span aria-hidden="true">→</span>
-                        </button>
-                      </li>
+                      <button
+                        className="entry-card"
+                        key={entry.id}
+                        onClick={() => open(entry)}
+                      >
+                        <span className="eyebrow">
+                          {kinds.find((k) => k.value === entry.kind)?.label ||
+                            "Journal"}{" "}
+                          · {entry.entry_date}
+                        </span>
+                        <h2>{entry.title || "Untitled page"}</h2>
+                        <p>{entry.corrected_transcription}</p>
+                        <span className="small">
+                          Page {entry.page_number || "—"} · Open page →
+                        </span>
+                      </button>
                     ))}
-                  </ol>
-                </section>
-              ) : view === "book" ? (
-                <BookReader key={`${activeDiaryId}:${jumpPage || ''}:${query}:${filter}`} pages={visible} title={currentDiary?.title || 'Loose pages'} initialPage={jumpPage} onEdit={(page)=>open(entries.find(entry=>entry.id===page.id) || null)} />
-              ) : (
-                <div className="cards">
-                  {visible.map((entry) => (
-                    <button
-                      className="entry-card"
-                      key={entry.id}
-                      onClick={() => open(entry)}
-                    >
-                      <span className="eyebrow">
-                        {kinds.find((k) => k.value === entry.kind)?.label ||
-                          "Journal"}{" "}
-                        · {entry.entry_date}
-                      </span>
-                      <h2>{entry.title || "Untitled page"}</h2>
-                      <p>{entry.corrected_transcription}</p>
-                      <span className="small">
-                        Page {entry.page_number || "—"} · Open page →
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </>
